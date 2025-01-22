@@ -39,7 +39,7 @@ const subscribe = (...args) => {
   const type = args.join(".");
   const id = uuid();
 
-  console.debug("react-event", "subscribe", type, id);
+  console.debug("node-event", "subscribe", type, id);
 
   if (type === '__proto__' || type === 'constructor' || type === 'prototype') {
     throw new Error("Invalid subscription type");
@@ -53,7 +53,7 @@ const subscribe = (...args) => {
     type,
     callback,
     unsubscribe: () => {
-      console.debug("react-event", "unsubscribe", type, id);
+      console.debug("node-event", "unsubscribe", type, id);
       delete subscriptions[type][id];
 
       if (Object.keys(subscriptions[type]).length === 0) {
@@ -81,7 +81,7 @@ const publish = (...args) => {
   const payload = args.pop();
   const type = args.join(".");
 
-  console.log("react-event", "publish", type, payload);
+  console.log("node-event", "publish", type, payload);
   messages.set(type, payload);
 
   if (type === '__proto__' || type === 'constructor' || type === 'prototype') {

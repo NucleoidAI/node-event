@@ -1,6 +1,6 @@
 import { subscribe, publish, messages } from "../Event.js";
 
-describe("react-event", () => {
+describe("node-event", () => {
   it("accepts type and payload", () => {
     expect(() => publish("TEST_EVENT")).toThrow();
   });
