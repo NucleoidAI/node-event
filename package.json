@@ -1,5 +1,5 @@
 {
-  "name": "@nucleoidai/event-event",
+  "name": "@nucleoidai/node-event",
   "version": "1.0.0",
   "type": "module",
   "description": "Event-driven Message Broker",
