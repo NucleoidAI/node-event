@@ -7,8 +7,6 @@
   "homepage": "https://nucleoid.ai",
   "license": "Apache-2.0",
   "keywords": [
-    "react-event",
-    "useEvent",
     "event"
   ],
   "scripts": {

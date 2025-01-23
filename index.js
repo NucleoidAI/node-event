@@ -1,3 +1,3 @@
-import { subscribe, publish } from "./src/Event.js";
+import { subscribe, publish } from "./src/Event";
 
 export { subscribe, publish };
