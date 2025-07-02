@@ -1,31 +1,46 @@
 import { Socket, io } from 'socket.io-client';
 
-const socket: Socket = io('http://localhost:8080');
-
-type Callback<T = any> = (payload: T) => void;
+// Internal state
+let socket: Socket | null = null;
 const callbacks: Record<string, Set<Callback>> = {};
 
-function subscribe<T = any>(type: string, callback: Callback<T>): () => void {
-  if (!callbacks[type]) callbacks[type] = new Set();
-  callbacks[type].add(callback as Callback);
-  socket.emit('subscribe', type);
-  return () => {
-    callbacks[type].delete(callback as Callback);
-    if (callbacks[type].size === 0) {
-      delete callbacks[type];
-      socket.emit('unsubscribe', type);
-    }
-  };
+// Types
+interface InitOptions {
+  host: string;
+  port: number;
+  protocol?: 'http' | 'https';
 }
+type Callback<T = any> = (payload: T) => void;
 
-function publish<T = any>(type: string, payload: T): void {
-  socket.emit('publish', { type, payload });
-}
+const nodeEvent = {
+  init({ host, port, protocol = 'http' }: InitOptions) {
+    if (socket) return; // Prevent re-initialization
+    socket = io(`${protocol}://${host}:${port}`);
+    socket.on('event', ({ type, payload }: { type: string; payload: any }) => {
+      if (callbacks[type]) {
+        callbacks[type].forEach((cb) => cb(payload));
+      }
+    });
+  },
 
-socket.on('event', ({ type, payload }: { type: string; payload: any }) => {
-  if (callbacks[type]) {
-    callbacks[type].forEach((cb) => cb(payload));
-  }
-});
+  subscribe<T = any>(type: string, callback: Callback<T>): () => void {
+    if (!socket) throw new Error('nodeEvent not initialized. Call nodeEvent.init first.');
+    if (!callbacks[type]) callbacks[type] = new Set();
+    callbacks[type].add(callback as Callback);
+    socket!.emit('subscribe', type);
+    return () => {
+      callbacks[type].delete(callback as Callback);
+      if (callbacks[type].size === 0) {
+        delete callbacks[type];
+        socket!.emit('unsubscribe', type);
+      }
+    };
+  },
 
-export { subscribe, publish }; 
+  publish<T = any>(type: string, payload: T): void {
+    if (!socket) throw new Error('nodeEvent not initialized. Call nodeEvent.init first.');
+    socket!.emit('publish', { type, payload });
+  },
+};
+
+export { nodeEvent }; 
