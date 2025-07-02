@@ -1,13 +1,15 @@
 {
   "name": "nuc-node-event-test",
-  "version": "1.0.11",
+  "version": "1.0.13",
   "description": "Event-driven Message Broker",
   "main": "index.js",
   "keywords": [
     "event"
   ],
   "scripts": {
-    "test": "jest src"
+    "test": "jest src",
+    "start": "node sample/publisher/index.js && node sample/subscriber/index.js && npx nuc-node-event-test/server",
+    "build": "npx tsc client/Event.ts --outDir client --declaration"
   },
   "dependencies": {
     "chalk": "^4.1.2",
