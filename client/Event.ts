@@ -1,20 +1,18 @@
 import { Socket, io } from "socket.io-client";
 
-// Internal state
 let socket: Socket | null = null;
 const callbacks: Record<string, Set<Callback>> = {};
 
-// Types
 interface InitOptions {
   host: string;
   port: number;
-  protocol?: "http" | "https";
+  protocol: string;
 }
 type Callback<T = any> = (payload: T) => void;
 
 const nodeEvent = {
   init({ host, port, protocol }: InitOptions) {
-    if (socket) return; // Prevent re-initialization
+    if (socket) return; 
     socket = io(`${protocol}://${host}:${port}`);
     socket.on("event", ({ type, payload }: { type: string; payload: any }) => {
       if (callbacks[type]) {
