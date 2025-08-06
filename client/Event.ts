@@ -10,7 +10,7 @@ interface InitOptions {
 }
 type Callback<T = any> = (payload: T) => void;
 
-const nodeEvent = {
+const event = {
   init({ host, port, protocol }: InitOptions) {
     if (socket) return; 
     socket = io(`${protocol}://${host}:${port}`);
@@ -23,7 +23,7 @@ const nodeEvent = {
 
   subscribe<T = any>(type: string, callback: Callback<T>): () => void {
     if (!socket)
-      throw new Error("nodeEvent not initialized. Call nodeEvent.init first.");
+      throw new Error("Event not initialized. Call event.init first.");
     if (!callbacks[type]) callbacks[type] = new Set();
     callbacks[type].add(callback as Callback);
     socket!.emit("subscribe", type);
@@ -38,7 +38,7 @@ const nodeEvent = {
 
   publish<T = any>(...args: [...string[], T]): void {
     if (!socket)
-      throw new Error("nodeEvent not initialized. Call nodeEvent.init first.");
+      throw new Error("Event not initialized. Call event.init first.");
     
     if (args.length < 2) {
       throw new Error("publish requires at least one event type and a payload");
@@ -54,4 +54,4 @@ const nodeEvent = {
   },
 };
 
-export { nodeEvent };
+export { event };

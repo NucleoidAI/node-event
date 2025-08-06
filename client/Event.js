@@ -1,10 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.nodeEvent = void 0;
+exports.event = void 0;
 var socket_io_client_1 = require("socket.io-client");
 var socket = null;
 var callbacks = {};
-var nodeEvent = {
+var event = {
     init: function (_a) {
         var host = _a.host, port = _a.port, protocol = _a.protocol;
         if (socket)
@@ -19,7 +19,7 @@ var nodeEvent = {
     },
     subscribe: function (type, callback) {
         if (!socket)
-            throw new Error("nodeEvent not initialized. Call nodeEvent.init first.");
+            throw new Error("Event not initialized. Call event.init first.");
         if (!callbacks[type])
             callbacks[type] = new Set();
         callbacks[type].add(callback);
@@ -38,7 +38,7 @@ var nodeEvent = {
             args[_i] = arguments[_i];
         }
         if (!socket)
-            throw new Error("nodeEvent not initialized. Call nodeEvent.init first.");
+            throw new Error("Event not initialized. Call event.init first.");
         if (args.length < 2) {
             throw new Error("publish requires at least one event type and a payload");
         }
@@ -50,4 +50,4 @@ var nodeEvent = {
         });
     },
 };
-exports.nodeEvent = nodeEvent;
+exports.event = event;

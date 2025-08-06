@@ -4,9 +4,9 @@ interface InitOptions {
     protocol: string;
 }
 type Callback<T = any> = (payload: T) => void;
-declare const nodeEvent: {
+declare const event: {
     init({ host, port, protocol }: InitOptions): void;
     subscribe<T = any>(type: string, callback: Callback<T>): () => void;
     publish<T = any>(...args: [...string[], T]): void;
 };
-export { nodeEvent };
+export { event };
