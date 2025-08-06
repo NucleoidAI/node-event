@@ -1,11 +1,11 @@
 const express = require('express');
-const { nodeEvent } = require('nuc-node-event-test/client');
+const { event } = require('@nucleoidai/node-event/client');
 
 const app = express();
 
-nodeEvent.init({ host: 'localhost', port: 8080 });
+event.init({ host: 'localhost', port: 8080 });
 
-nodeEvent.subscribe('test', (payload) => {
+event.subscribe('test', (payload) => {
   console.log('Received event:', payload);
 });
 
