@@ -1,6 +1,6 @@
 {
   "name": "@nucleoidai/react-event",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Event-driven Message Broker",
   "main": "index.js",
   "keywords": [
