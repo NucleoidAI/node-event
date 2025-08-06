@@ -1,6 +1,6 @@
 {
-  "name": "nuc-node-event-test",
-  "version": "1.0.15",
+  "name": "@nucleoidai/react-event",
+  "version": "0.0.0",
   "description": "Event-driven Message Broker",
   "main": "index.js",
   "keywords": [
