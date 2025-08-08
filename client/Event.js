@@ -9,7 +9,8 @@ var event = {
         var host = _a.host, port = _a.port, protocol = _a.protocol;
         if (socket)
             return;
-        socket = (0, socket_io_client_1.io)("".concat(protocol, "://").concat(host, ":").concat(port));
+        var socketPath = port ? "".concat(protocol, "://").concat(host, ":").concat(port) : "".concat(protocol, "://").concat(host);
+        socket = (0, socket_io_client_1.io)(socketPath);
         socket.on("event", function (_a) {
             var type = _a.type, payload = _a.payload;
             if (callbacks[type]) {
