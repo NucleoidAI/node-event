@@ -1,6 +1,6 @@
 interface InitOptions {
     host: string;
-    port: number;
+    port?: number;
     protocol: string;
 }
 type Callback<T = any> = (payload: T) => void;

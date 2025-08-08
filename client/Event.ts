@@ -5,7 +5,7 @@ const callbacks: Record<string, Set<Callback>> = {};
 
 interface InitOptions {
   host: string;
-  port: number;
+  port?: number;
   protocol: string;
 }
 type Callback<T = any> = (payload: T) => void;
@@ -13,7 +13,8 @@ type Callback<T = any> = (payload: T) => void;
 const event = {
   init({ host, port, protocol }: InitOptions) {
     if (socket) return; 
-    socket = io(`${protocol}://${host}:${port}`);
+    const socketPath = port ? `${protocol}://${host}:${port}` : `${protocol}://${host}`;
+    socket = io(socketPath);
     socket.on("event", ({ type, payload }: { type: string; payload: any }) => {
       if (callbacks[type]) {
         callbacks[type].forEach((cb) => cb(payload));
