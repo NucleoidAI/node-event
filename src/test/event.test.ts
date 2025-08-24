@@ -1,4 +1,4 @@
-import { subscribe, publish, messages } from "../Event";
+import { messages, publish, subscribe } from "../Event";
 
 describe("node-event", () => {
   it("accepts type and payload", () => {
@@ -19,12 +19,12 @@ describe("node-event", () => {
   });
 
   it("publishes and subscribes events", (done) => {
-    publish("TEST_EVENT", { number: 10, string: "blue" });
-
     subscribe("TEST_EVENT", (result) => {
       expect(result).toMatchObject({ number: 10, string: "blue" });
       done();
     });
+
+    publish("TEST_EVENT", { number: 10, string: "blue" });
   });
 
   it("notifies all subscribers of an event", (done) => {
