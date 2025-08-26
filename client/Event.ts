@@ -34,6 +34,13 @@ const event = {
   init(options: InitOptions) {
     switch (options.type) {
       case "inMemory":
+        if (!options.host) {
+          throw new Error("host is required for inMemory initialization");
+        }
+        if (!options.protocol) {
+          throw new Error("protocol is required for inMemory initialization");
+        }
+        
         const { host, protocol } = options;
 
         const socketPath = options?.port
@@ -51,6 +58,16 @@ const event = {
         );
         break;
       case "kafka":
+        if (!options.clientId) {
+          throw new Error("clientId is required for Kafka initialization");
+        }
+        if (!options.brokers || !Array.isArray(options.brokers) || options.brokers.length === 0) {
+          throw new Error("brokers array is required for Kafka initialization");
+        }
+        if (!options.groupId) {
+          throw new Error("groupId is required for Kafka initialization");
+        }
+        
         kafka = new Kafka({
           clientId: options.clientId,
           brokers: options.brokers,
@@ -105,9 +122,12 @@ const event = {
       consumer.run({
         eachMessage: async ({ topic, partition, message }) => {
           if (callbacks[topic]) {
-            callbacks[topic].forEach((cb) =>
-              cb(JSON.parse(message.value?.toString() || ""))
-            );
+            try {
+              const payload = JSON.parse(message.value?.toString() || "{}");
+              callbacks[topic].forEach((cb) => cb(payload));
+            } catch (error) {
+              console.error(`Failed to parse message from topic ${topic}:`, error);
+            }
           }
         },
       });
@@ -117,7 +137,9 @@ const event = {
       callbacks[type].delete(callback as Callback);
       if (callbacks[type].size === 0) {
         delete callbacks[type];
-        socket!.emit("unsubscribe", type);
+        if (socket) {
+          socket.emit("unsubscribe", type);
+        }
       }
     };
   },
