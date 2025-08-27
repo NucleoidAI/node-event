@@ -44,9 +44,9 @@
   },
   "exports": {
     ".": {
-      "import": "./src/Event.ts",
-      "require": "./src/Event.ts",
-      "types": "./src/Event.ts"
+      "import": "./src/Event.js",
+      "require": "./src/Event.js",
+      "types": "./src/Event.d.ts"
     },
     "./client": {
       "import": "./client/Event.js",
