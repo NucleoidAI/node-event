@@ -7,6 +7,7 @@
     "event"
   ],
   "scripts": {
+    "test": "jest src",
     "start": "node sample/publisher/index.js && node sample/subscriber/index.js && npx nuc-node-event-test/server",
     "build": "npx tsc client/Event.ts --outDir client --declaration && npx tsc src/Event.ts --outDir src --declaration",
     "kafka:up": "docker-compose up -d",
