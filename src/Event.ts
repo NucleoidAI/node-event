@@ -1,4 +1,5 @@
-import client from "prom-client";
+import * as client from "prom-client";
+
 import { v4 as uuid } from "uuid";
 
 const subscriptions = {};
