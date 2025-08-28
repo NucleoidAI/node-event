@@ -32,7 +32,6 @@ const eventPublishDuration = new client.Histogram({
   buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
 });
 
-// Track payload size for analysis
 const eventPayloadSize = new client.Histogram({
   name: "event_payload_size_bytes",
   help: "Size of event payloads in bytes",
@@ -40,14 +39,12 @@ const eventPayloadSize = new client.Histogram({
   buckets: [10, 100, 1000, 10000, 100000, 1000000],
 });
 
-// Track error rates
 const eventPublishErrors = new client.Counter({
   name: "event_publish_errors_total",
   help: "Total number of event publish errors",
   labelNames: ["event_type", "error_type"],
 });
 
-// Track callback processing duration
 const callbackProcessingDuration = new client.Histogram({
   name: "event_callback_duration_seconds",
   help: "Time taken to process event callbacks",
@@ -55,21 +52,18 @@ const callbackProcessingDuration = new client.Histogram({
   buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
 });
 
-// Track subscription rates
 const subscriptionRate = new client.Counter({
   name: "event_subscriptions_total",
   help: "Total number of event subscriptions created",
   labelNames: ["event_type"],
 });
 
-// Track unsubscription rates
 const unsubscriptionRate = new client.Counter({
   name: "event_unsubscriptions_total",
   help: "Total number of event unsubscriptions",
   labelNames: ["event_type"],
 });
 
-// Track throughput (events processed per second)
 const eventThroughput = new client.Counter({
   name: "event_callbacks_processed_total",
   help: "Total number of event callbacks processed successfully",
