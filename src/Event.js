@@ -163,7 +163,16 @@ const publish = (...args) => {
   const endTimer = eventPublishDuration.labels(type).startTimer();
   eventPublishCounter.labels(type).inc();
 
-  const payloadSize = JSON.stringify(payload).length;
+  let payloadSize = 0;
+  try {
+    payloadSize = JSON.stringify(payload).length;
+  } catch (err) {
+    console.error("node-event", "error stringifying payload", type, err);
+    const errorName = err instanceof Error ? err.name : "UnknownError";
+    eventPublishErrors.labels(type, errorName).inc();
+    payloadSize = 0;
+  }
+
   eventPayloadSize.labels(type).observe(payloadSize);
 
   Object.keys(subscriptions[type] || {}).forEach((key) => {
