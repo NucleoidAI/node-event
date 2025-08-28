@@ -36,100 +36,93 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.event = void 0;
-var InMemoryAdapter_1 = require("./adapters/InMemoryAdapter");
-var KafkaAdapter_1 = require("./adapters/KafkaAdapter");
-var event = {
-    init: function (options) {
+exports.InMemoryAdapter = void 0;
+var socket_io_client_1 = require("socket.io-client");
+var callbacks = {};
+var InMemoryAdapter = /** @class */ (function () {
+    function InMemoryAdapter() {
+        this.socket = null;
+    }
+    InMemoryAdapter.prototype.init = function (options) {
         return __awaiter(this, void 0, void 0, function () {
-            var adapter;
+            var opts, host, protocol, socketPath;
             return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        adapter = options.type === "inMemory" ? new InMemoryAdapter_1.InMemoryAdapter() : new KafkaAdapter_1.KafkaAdapter();
-                        this._adapter = adapter;
-                        return [4 /*yield*/, adapter.init(options)];
-                    case 1:
-                        _a.sent();
-                        return [2 /*return*/];
+                opts = options;
+                if (!opts.host) {
+                    throw new Error("host is required for inMemory initialization");
                 }
+                if (!opts.protocol) {
+                    throw new Error("protocol is required for inMemory initialization");
+                }
+                host = opts.host, protocol = opts.protocol;
+                socketPath = (opts === null || opts === void 0 ? void 0 : opts.port) ? "".concat(protocol, "://").concat(host, ":").concat(opts.port) : "".concat(protocol, "://").concat(host);
+                this.socket = (0, socket_io_client_1.io)(socketPath);
+                this.socket.on("event", function (_a) {
+                    var type = _a.type, payload = _a.payload;
+                    if (callbacks[type]) {
+                        callbacks[type].forEach(function (cb) { return cb(payload); });
+                    }
+                });
+                return [2 /*return*/];
             });
         });
-    },
-    publish: function () {
+    };
+    InMemoryAdapter.prototype.publish = function () {
         var args = [];
         for (var _i = 0; _i < arguments.length; _i++) {
             args[_i] = arguments[_i];
         }
         return __awaiter(this, void 0, void 0, function () {
-            var adapter;
+            var payload, types;
+            var _this = this;
             return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        adapter = this._adapter;
-                        if (!adapter)
-                            throw new Error("Event not initialized");
-                        return [4 /*yield*/, adapter.publish.apply(adapter, args)];
-                    case 1:
-                        _a.sent();
-                        return [2 /*return*/];
+                if (!this.socket)
+                    return [2 /*return*/];
+                payload = args[args.length - 1];
+                types = args.slice(0, -1);
+                types.forEach(function (type) {
+                    _this.socket.emit("publish", { type: type, payload: payload });
+                });
+                return [2 /*return*/];
+            });
+        });
+    };
+    InMemoryAdapter.prototype.subscribe = function (type, callback) {
+        return __awaiter(this, void 0, void 0, function () {
+            var _this = this;
+            return __generator(this, function (_a) {
+                if (!callbacks[type])
+                    callbacks[type] = new Set();
+                callbacks[type].add(callback);
+                if (this.socket) {
+                    this.socket.emit("subscribe", type);
                 }
-            });
-        });
-    },
-    subscribe: function (type, callback) {
-        return __awaiter(this, void 0, void 0, function () {
-            var adapter;
-            return __generator(this, function (_a) {
-                adapter = this._adapter;
-                if (!adapter)
-                    throw new Error("Event not initialized");
-                return [2 /*return*/, adapter.subscribe(type, callback)];
-            });
-        });
-    },
-    cleanup: function () {
-        return __awaiter(this, void 0, void 0, function () {
-            var adapter;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        adapter = this._adapter;
-                        if (!adapter)
+                return [2 /*return*/, function () { return __awaiter(_this, void 0, void 0, function () {
+                        return __generator(this, function (_a) {
+                            callbacks[type].delete(callback);
+                            if (callbacks[type].size === 0) {
+                                delete callbacks[type];
+                                if (this.socket) {
+                                    this.socket.emit("unsubscribe", type);
+                                }
+                            }
                             return [2 /*return*/];
-                        return [4 /*yield*/, adapter.cleanup()];
-                    case 1:
-                        _a.sent();
-                        return [2 /*return*/];
-                }
+                        });
+                    }); }];
             });
         });
-    },
-};
-exports.event = event;
-process.on("SIGINT", function () { return __awaiter(void 0, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Shutting down gracefully...");
-                return [4 /*yield*/, event.cleanup()];
-            case 1:
-                _a.sent();
-                process.exit(0);
+    };
+    InMemoryAdapter.prototype.cleanup = function () {
+        return __awaiter(this, void 0, void 0, function () {
+            return __generator(this, function (_a) {
+                if (this.socket) {
+                    this.socket.disconnect();
+                    this.socket = null;
+                }
                 return [2 /*return*/];
-        }
-    });
-}); });
-process.on("SIGTERM", function () { return __awaiter(void 0, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Shutting down gracefully...");
-                return [4 /*yield*/, event.cleanup()];
-            case 1:
-                _a.sent();
-                process.exit(0);
-                return [2 /*return*/];
-        }
-    });
-}); });
+            });
+        });
+    };
+    return InMemoryAdapter;
+}());
+exports.InMemoryAdapter = InMemoryAdapter;

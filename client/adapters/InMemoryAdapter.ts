@@ -1,5 +1,7 @@
-import { Callback, EventAdapter, InMemoryOptions, InitOptions } from "./types";
+import { Callback, InMemoryOptions, InitOptions } from "./types";
 import { Socket, io } from "socket.io-client";
+
+import { EventAdapter } from "./Adapter";
 
 const callbacks: Record<string, Set<Callback>> = {};
 

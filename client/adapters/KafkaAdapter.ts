@@ -1,5 +1,7 @@
-import { Callback, EventAdapter, InitOptions, KafkaOptions } from "./types";
+import { Callback, InitOptions, KafkaOptions } from "./types";
 import { Consumer, Kafka, Producer } from "kafkajs";
+
+import { EventAdapter } from "./Adapter";
 
 const callbacks: Record<string, Set<Callback>> = {};
 
@@ -155,5 +157,6 @@ export class KafkaAdapter implements EventAdapter {
     this.kafka = null;
   }
 }
+
 
 

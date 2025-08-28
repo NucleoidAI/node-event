@@ -1,7 +1,8 @@
-import { Callback, EventAdapter, InitOptions } from "./types";
+import { Callback, InitOptions } from "./adapters/types";
 
-import { InMemoryAdapter } from "./InMemoryAdapter";
-import { KafkaAdapter } from "./KafkaAdapter";
+import { EventAdapter } from "./adapters/Adapter";
+import { InMemoryAdapter } from "./adapters/InMemoryAdapter";
+import { KafkaAdapter } from "./adapters/KafkaAdapter";
 
 const event = {
   async init(options: InitOptions) {
