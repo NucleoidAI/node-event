@@ -105,7 +105,7 @@ const subscribe = (...args) => {
   const type = args.join(".");
   const id = uuid();
 
-  console.debug("node-event", "subscribe", type, id);
+  console.log("node-event", "subscribe", type, id);
 
   if (type === "__proto__" || type === "constructor" || type === "prototype") {
     throw new Error("Invalid subscription type");
@@ -119,10 +119,9 @@ const subscribe = (...args) => {
     type,
     callback,
     unsubscribe: () => {
-      console.debug("node-event", "unsubscribe", type, id);
+      console.log("node-event", "unsubscribe", type, id);
       delete subscriptions[type][id];
 
-      // Track unsubscription
       unsubscriptionRate.labels(type).inc();
 
       if (Object.keys(subscriptions[type]).length === 0) {
@@ -138,7 +137,6 @@ const subscribe = (...args) => {
 
   subscriptions[type][id] = registry;
 
-  // Update subscription metrics
   subscriptionRate.labels(type).inc();
   eventSubscriptionGauge
     .labels(type)
@@ -162,11 +160,9 @@ const publish = (...args) => {
     throw new Error("Invalid publish type");
   }
 
-  // Track metrics for event publishing
   const endTimer = eventPublishDuration.labels(type).startTimer();
   eventPublishCounter.labels(type).inc();
 
-  // Track payload size
   const payloadSize = JSON.stringify(payload).length;
   eventPayloadSize.labels(type).observe(payloadSize);
 
