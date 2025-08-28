@@ -9,7 +9,7 @@
   "scripts": {
     "test": "jest src",
     "start": "node sample/publisher/index.js && node sample/subscriber/index.js && npx nuc-node-event-test/server",
-    "build": "npx tsc client/Event.ts --outDir client --declaration"
+    "build": "npx tsc client/Event.ts --outDir client --declaration && npx tsc src/Event.ts --outDir src --declaration"
   },
   "dependencies": {
     "chalk": "^4.1.2",
@@ -44,9 +44,9 @@
   },
   "exports": {
     ".": {
-      "import": "./src/Event.ts",
-      "require": "./src/Event.ts",
-      "types": "./src/Event.ts"
+      "import": "./src/Event.js",
+      "require": "./src/Event.js",
+      "types": "./src/Event.d.ts"
     },
     "./client": {
       "import": "./client/Event.js",
