@@ -1,58 +1,49 @@
-import { Socket, io } from "socket.io-client";
+import { Callback, InitOptions } from "./adapters/types";
 
-let socket: Socket | null = null;
-const callbacks: Record<string, Set<Callback>> = {};
-
-interface InitOptions {
-  host: string;
-  port?: number;
-  protocol: string;
-}
-type Callback<T = any> = (payload: T) => void;
+import { EventAdapter } from "./adapters/Adapter";
+import { InMemoryAdapter } from "./adapters/InMemoryAdapter";
+import { KafkaAdapter } from "./adapters/KafkaAdapter";
 
 const event = {
-  init({ host, port, protocol }: InitOptions) {
-    if (socket) return; 
-    const socketPath = port ? `${protocol}://${host}:${port}` : `${protocol}://${host}`;
-    socket = io(socketPath);
-    socket.on("event", ({ type, payload }: { type: string; payload: any }) => {
-      if (callbacks[type]) {
-        callbacks[type].forEach((cb) => cb(payload));
-      }
-    });
+  async init(options: InitOptions) {
+    const adapter: EventAdapter =
+      options.type === "inMemory" ? new InMemoryAdapter() : new KafkaAdapter();
+    (this as any)._adapter = adapter;
+    await adapter.init(options);
   },
 
-  subscribe<T = any>(type: string, callback: Callback<T>): () => void {
-    if (!socket)
-      throw new Error("Event not initialized. Call event.init first.");
-    if (!callbacks[type]) callbacks[type] = new Set();
-    callbacks[type].add(callback as Callback);
-    socket!.emit("subscribe", type);
-    return () => {
-      callbacks[type].delete(callback as Callback);
-      if (callbacks[type].size === 0) {
-        delete callbacks[type];
-        socket!.emit("unsubscribe", type);
-      }
-    };
+  async publish<T = any>(...args: [...string[], T]): Promise<void> {
+    const adapter: EventAdapter | undefined = (this as any)._adapter;
+    if (!adapter) throw new Error("Event not initialized");
+    await adapter.publish(...args);
   },
 
-  publish<T = any>(...args: [...string[], T]): void {
-    if (!socket)
-      throw new Error("Event not initialized. Call event.init first.");
-    
-    if (args.length < 2) {
-      throw new Error("publish requires at least one event type and a payload");
-    }
-    
-    const payload = args[args.length - 1];
-    const types = args.slice(0, -1) as string[];
-    
-    // Publish to all specified event types
-    types.forEach(type => {
-      socket!.emit("publish", { type, payload });
-    });
+  async subscribe<T = any>(
+    type: string,
+    callback: Callback<T>
+  ): Promise<() => void> {
+    const adapter: EventAdapter | undefined = (this as any)._adapter;
+    if (!adapter) throw new Error("Event not initialized");
+    return adapter.subscribe(type, callback as any);
+  },
+
+  async cleanup() {
+    const adapter: EventAdapter | undefined = (this as any)._adapter;
+    if (!adapter) return;
+    await adapter.cleanup();
   },
 };
+
+process.on("SIGINT", async () => {
+  console.log("Shutting down gracefully...");
+  await event.cleanup();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("Shutting down gracefully...");
+  await event.cleanup();
+  process.exit(0);
+});
 
 export { event };
