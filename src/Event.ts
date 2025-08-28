@@ -113,7 +113,6 @@ const subscribe = (...args) => {
       console.debug("node-event", "unsubscribe", type, id);
       delete subscriptions[type][id];
 
-      // Track unsubscription
       unsubscriptionRate.labels(type).inc();
 
       if (Object.keys(subscriptions[type]).length === 0) {
