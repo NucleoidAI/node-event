@@ -274,4 +274,4 @@ const event = {
   },
 };
 
-export { event };
+export { event, client };
