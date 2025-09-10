@@ -1,15 +1,14 @@
 {
-  "name": "@nucleoidai/node-event",
-  "version": "1.1.5",
+  "name": "node-event-test-package",
+  "version": "1.1.4",
   "description": "Event-driven Message Broker",
   "main": "index.js",
   "keywords": [
     "event"
   ],
   "scripts": {
-    "test": "echo 'No tests'",
     "start": "node sample/publisher/index.js && node sample/subscriber/index.js && npx nuc-node-event-test/server",
-    "build": "npx tsc client/Event.ts --outDir client --declaration && npx tsc src/Event.ts --outDir src --declaration",
+    "build": "npx tsc client/Event.ts --outDir client --declaration",
     "kafka:up": "docker-compose up -d",
     "kafka:down": "docker-compose down",
     "kafka:test": "node examples/kafka-example.js"
@@ -48,9 +47,9 @@
   },
   "exports": {
     ".": {
-      "import": "./src/Event.js",
-      "require": "./src/Event.js",
-      "types": "./src/Event.d.ts"
+      "import": "./src/Event.ts",
+      "require": "./src/Event.ts",
+      "types": "./src/Event.ts"
     },
     "./client": {
       "import": "./client/Event.js",
