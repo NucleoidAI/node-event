@@ -1,8 +1,38 @@
 import * as client from "prom-client";
 
+import { Consumer, Kafka } from "kafkajs";
 import { Socket, io } from "socket.io-client";
 
-import { Kafka } from "kafkajs";
+let socket: Socket | null = null;
+let kafka: Kafka | null = null;
+let kafkaGroupId: string | null = null;
+let sharedConsumer: Consumer | null = null;
+let subscribedTopics: Set<string> = new Set();
+
+const callbacks: Record<string, Set<Callback>> = {};
+
+
+interface BaseInitOptions {
+  type: "inMemory" | "socket" | "kafka";
+}
+
+interface InMemoryOptions extends BaseInitOptions {
+  type: "inMemory";
+  host: string;
+  port?: number;
+  protocol: string;
+}
+
+interface KafkaOptions extends BaseInitOptions {
+  type: "kafka";
+  clientId: string;
+  brokers: string[];
+  groupId: string;
+}
+
+type InitOptions = InMemoryOptions | KafkaOptions;
+
+type Callback<T = any> = (payload: T) => void;
 
 const eventPublishCounter = new client.Counter({
   name: "events_published_total",
@@ -60,40 +90,12 @@ const unsubscriptionRate = new client.Counter({
   labelNames: ["event_type"],
 });
 
-// Track throughput (events processed per second)
+  // Track throughput (events processed per second)
 const eventThroughput = new client.Counter({
   name: "event_callbacks_processed_total",
   help: "Total number of event callbacks processed successfully",
   labelNames: ["event_type"],
 });
-
-let socket: Socket | null = null;
-let kafka: Kafka | null = null;
-let kafkaGroupId: string | null = null;
-
-const callbacks: Record<string, Set<Callback>> = {};
-
-interface BaseInitOptions {
-  type: "inMemory" | "socket" | "kafka";
-}
-
-interface InMemoryOptions extends BaseInitOptions {
-  type: "inMemory";
-  host: string;
-  port?: number;
-  protocol: string;
-}
-
-interface KafkaOptions extends BaseInitOptions {
-  type: "kafka";
-  clientId: string;
-  brokers: string[];
-  groupId: string;
-}
-
-type InitOptions = InMemoryOptions | KafkaOptions;
-
-type Callback<T = any> = (payload: T) => void;
 
 const event = {
   init(options: InitOptions) {
@@ -105,7 +107,7 @@ const event = {
         if (!options.protocol) {
           throw new Error("protocol is required for inMemory initialization");
         }
-
+        
         const { host, protocol } = options;
 
         const socketPath = options?.port
@@ -126,17 +128,13 @@ const event = {
         if (!options.clientId) {
           throw new Error("clientId is required for Kafka initialization");
         }
-        if (
-          !options.brokers ||
-          !Array.isArray(options.brokers) ||
-          options.brokers.length === 0
-        ) {
+        if (!options.brokers || !Array.isArray(options.brokers) || options.brokers.length === 0) {
           throw new Error("brokers array is required for Kafka initialization");
         }
         if (!options.groupId) {
           throw new Error("groupId is required for Kafka initialization");
         }
-
+        
         kafka = new Kafka({
           clientId: options.clientId,
           brokers: options.brokers,
@@ -154,70 +152,21 @@ const event = {
     const payload = args[args.length - 1];
     const types = args.slice(0, -1) as string[];
 
-    // Process each event type
-    for (const type of types) {
-      console.log("node-event", "publish", type, payload);
+    if (socket) {
+      types.forEach((type) => {
+        socket!.emit("publish", { type, payload });
+      });
+    } else if (kafka) {
+      const producer = kafka!.producer();
+      await producer.connect();
 
-      // Validation similar to sync version
-      if (
-        type === "__proto__" ||
-        type === "constructor" ||
-        type === "prototype"
-      ) {
-        throw new Error("Invalid publish type");
-      }
+      const messages = types.map(type => ({
+        topic: type,
+        messages: [{ value: JSON.stringify(payload) }],
+      }));
 
-      // Track metrics for event publishing
-      const endTimer = eventPublishDuration.labels(type).startTimer();
-      eventPublishCounter.labels(type).inc();
-
-      // Track payload size
-      const payloadSize = JSON.stringify(payload).length;
-      eventPayloadSize.labels(type).observe(payloadSize);
-
-      try {
-        if (socket) {
-          socket!.emit("publish", { type, payload });
-        } else if (kafka) {
-          const producer = kafka!.producer();
-          await producer.connect();
-
-          await producer.send({
-            topic: type,
-            messages: [{ value: JSON.stringify(payload) }],
-          });
-
-          await producer.disconnect();
-        }
-
-        // Process local callbacks if they exist
-        if (callbacks[type]) {
-          callbacks[type].forEach((callback) => {
-            setTimeout(() => {
-              const callbackTimer = callbackProcessingDuration
-                .labels(type)
-                .startTimer();
-              try {
-                callback(payload);
-                eventThroughput.labels(type).inc();
-              } catch (err) {
-                console.error("node-event", "error", type, err);
-                const errorName =
-                  err instanceof Error ? err.name : "UnknownError";
-                eventPublishErrors.labels(type, errorName).inc();
-              } finally {
-                callbackTimer();
-              }
-            }, 0);
-          });
-        }
-      } catch (err) {
-        console.error("node-event", "error", type, err);
-        const errorName = err instanceof Error ? err.name : "UnknownError";
-        eventPublishErrors.labels(type, errorName).inc();
-      } finally {
-        endTimer();
-      }
+      await Promise.all(messages.map(msg => producer.send(msg)));
+      await producer.disconnect();
     }
   },
 
@@ -229,49 +178,62 @@ const event = {
 
     callbacks[type].add(callback as Callback);
 
-    subscriptionRate.labels(type).inc();
-    eventSubscriptionGauge.labels(type).set(callbacks[type].size);
-
     if (socket) {
       socket!.emit("subscribe", type);
     } else if (kafka) {
-      const consumer = kafka!.consumer({ groupId: kafkaGroupId! });
-      await consumer.connect();
-      await consumer.subscribe({ topic: type, fromBeginning: true });
-
-      consumer.run({
-        eachMessage: async ({ topic, partition, message }) => {
-          if (callbacks[topic]) {
-            try {
-              const payload = JSON.parse(message.value?.toString() || "{}");
-              callbacks[topic].forEach((cb) => cb(payload));
-            } catch (error) {
-              console.error(
-                `Failed to parse message from topic ${topic}:`,
-                error
-              );
+      if (!sharedConsumer) {
+        sharedConsumer = kafka!.consumer({ groupId: kafkaGroupId! });
+        await sharedConsumer.connect();
+        
+        await sharedConsumer.run({
+          eachMessage: async ({ topic, partition, message }) => {
+            if (callbacks[topic]) {
+              try {
+                const payload = JSON.parse(message.value?.toString() || "{}");
+                callbacks[topic].forEach((cb) => cb(payload));
+              } catch (error) {
+                console.error(`Failed to parse message from topic ${topic}:`, error);
+              }
             }
-          }
-        },
-      });
+          },
+        });
+      }
+      
+      if (!subscribedTopics.has(type)) {
+        await sharedConsumer.subscribe({ topic: type, fromBeginning: false });
+        subscribedTopics.add(type);
+      }
     }
 
     return async () => {
       callbacks[type].delete(callback as Callback);
-
-      unsubscriptionRate.labels(type).inc();
-
       if (callbacks[type].size === 0) {
         delete callbacks[type];
-        eventSubscriptionGauge.labels(type).set(0);
         if (socket) {
           socket.emit("unsubscribe", type);
         }
-      } else {
-        eventSubscriptionGauge.labels(type).set(callbacks[type].size);
       }
     };
   },
+
+
+
+  async disconnect() {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    } else if (kafka) {
+      if (sharedConsumer) {
+        await sharedConsumer.disconnect();
+        sharedConsumer = null;
+      }
+      
+      subscribedTopics.clear();
+      kafka = null;
+    }
+    
+    Object.keys(callbacks).forEach(key => delete callbacks[key]);
+  }
 };
 
-export { event, client };
+export { event };
