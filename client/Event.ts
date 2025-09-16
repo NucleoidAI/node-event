@@ -273,6 +273,8 @@ const event = {
         });
 
         await producer.disconnect();
+
+        setTimeout(() => updateKafkaBacklogMetrics(), 500);
       }
 
       if (callbacks[type]) {
@@ -310,8 +312,11 @@ const event = {
       const wasNewTopic = !subscribedTopics.has(type);
       if (wasNewTopic) {
         subscribedTopics.add(type);
-        
         await this.restartKafkaConsumer();
+
+        setTimeout(() => {
+          updateKafkaBacklogMetrics();
+        }, 1000);
       }
     }
 
@@ -343,13 +348,17 @@ const event = {
       isConsumerRunning = false;
     }
 
-    console.log(`Starting Kafka consumer with topics: ${Array.from(subscribedTopics).join(", ")}`);
+    console.log(
+      `Starting Kafka consumer with topics: ${Array.from(subscribedTopics).join(
+        ", "
+      )}`
+    );
     sharedConsumer = kafka.consumer({ groupId: kafkaGroupId! });
     await sharedConsumer.connect();
-    
-    await sharedConsumer.subscribe({ 
-      topics: Array.from(subscribedTopics), 
-      fromBeginning: false 
+
+    await sharedConsumer.subscribe({
+      topics: Array.from(subscribedTopics),
+      fromBeginning: false,
     });
 
     await sharedConsumer.run({
@@ -361,21 +370,24 @@ const event = {
             const callbackTimer = callbackProcessingDuration
               .labels(topic)
               .startTimer();
-            
+
             callbacks[topic].forEach((cb) => {
               cb(payload);
               eventThroughput.labels(topic).inc();
             });
-            
+
             callbackTimer();
           } catch (error) {
-            console.error(`Error processing message for topic ${topic}:`, error);
+            console.error(
+              `Error processing message for topic ${topic}:`,
+              error
+            );
             eventPublishErrors.labels(topic, "processing_error").inc();
           }
         }
       },
     });
-    
+
     isConsumerRunning = true;
   },
 
