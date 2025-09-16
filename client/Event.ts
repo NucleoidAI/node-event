@@ -8,6 +8,7 @@ let kafka: Kafka | null = null;
 let kafkaGroupId: string | null = null;
 let sharedConsumer: Consumer | null = null;
 let subscribedTopics: Set<string> = new Set();
+let backlogMonitoringInterval: NodeJS.Timeout | null = null;
 
 const callbacks: Record<string, Set<Callback>> = {};
 
@@ -96,6 +97,59 @@ const eventThroughput = new client.Counter({
   labelNames: ["event_type"],
 });
 
+const kafkaBacklogSize = new client.Gauge({
+  name: "kafka_backlog_events_total",
+  help: "Total number of events waiting to be processed",
+  labelNames: ["topic"],
+});
+
+// Function to update Kafka backlog metrics
+const updateKafkaBacklogMetrics = async () => {
+  if (!kafka || !kafkaGroupId || subscribedTopics.size === 0) return;
+
+  const admin = kafka.admin();
+  await admin.connect();
+
+  for (const topic of subscribedTopics) {
+    // Get consumer group offsets
+    const offsetsResponse = await admin.fetchOffsets({
+      groupId: kafkaGroupId,
+      topics: [topic],
+    });
+
+    // Get latest offsets for the topic
+    const topicOffsets = await admin.fetchTopicOffsets(topic);
+
+    let totalLag = 0;
+
+    // The response structure is: [{ topic: string, partitions: FetchOffsetsPartition[] }]
+    const topicResponse = offsetsResponse.find(
+      (response) => response.topic === topic
+    );
+
+    if (topicResponse) {
+      // Calculate lag for each partition
+      topicResponse.partitions.forEach((partitionOffset) => {
+        const latestOffset = topicOffsets.find(
+          (to) => to.partition === partitionOffset.partition
+        );
+
+        if (latestOffset) {
+          const consumerOffset = parseInt(partitionOffset.offset);
+          const latestOffsetValue = parseInt(latestOffset.offset);
+          const lag = Math.max(0, latestOffsetValue - consumerOffset);
+          totalLag += lag;
+        }
+      });
+    }
+
+    kafkaBacklogSize.labels(topic).set(totalLag);
+    console.log(`Backlog for topic ${topic}: ${totalLag} messages`);
+  }
+
+  await admin.disconnect();
+};
+
 const event = {
   init(options: InitOptions) {
     switch (options.type) {
@@ -143,7 +197,41 @@ const event = {
           brokers: options.brokers,
         });
         kafkaGroupId = options.groupId;
+
+        // Start backlog monitoring after Kafka initialization
+        event.startBacklogMonitoring();
         break;
+    }
+  },
+
+  // Start backlog monitoring
+  startBacklogMonitoring(intervalMs: number = 30000) {
+    if (kafka && !backlogMonitoringInterval) {
+      console.log("Starting Kafka backlog monitoring...");
+
+      // Run once immediately
+      updateKafkaBacklogMetrics();
+
+      // Set up periodic monitoring
+      backlogMonitoringInterval = setInterval(() => {
+        updateKafkaBacklogMetrics();
+      }, intervalMs);
+    }
+  },
+
+  // Stop backlog monitoring
+  stopBacklogMonitoring() {
+    if (backlogMonitoringInterval) {
+      clearInterval(backlogMonitoringInterval);
+      backlogMonitoringInterval = null;
+      console.log("Stopped Kafka backlog monitoring");
+    }
+  },
+
+  // Manual backlog check
+  async checkBacklog(): Promise<void> {
+    if (kafka) {
+      await updateKafkaBacklogMetrics();
     }
   },
 
@@ -173,9 +261,9 @@ const event = {
       eventPayloadSize.labels(type).observe(payloadSize);
 
       if (socket) {
-        socket!.emit("publish", { type, payload });
+        socket.emit("publish", { type, payload });
       } else if (kafka) {
-        const producer = kafka!.producer();
+        const producer = kafka.producer();
         await producer.connect();
 
         await producer.send({
@@ -216,16 +304,24 @@ const event = {
     eventSubscriptionGauge.labels(type).set(callbacks[type].size);
 
     if (socket) {
-      socket!.emit("subscribe", type);
+      socket.emit("subscribe", type);
     } else if (kafka) {
       if (!sharedConsumer) {
-        sharedConsumer = kafka!.consumer({ groupId: kafkaGroupId! });
+        sharedConsumer = kafka.consumer({ groupId: kafkaGroupId! });
         await sharedConsumer.connect();
         await sharedConsumer.run({
           eachMessage: async ({ topic, partition, message }) => {
             if (callbacks[topic]) {
               const payload = JSON.parse(message.value?.toString() || "{}");
-              callbacks[topic].forEach((cb) => cb(payload));
+              callbacks[topic].forEach((cb) => {
+                const callbackTimer = callbackProcessingDuration
+                  .labels(topic)
+                  .startTimer();
+
+                cb(payload);
+                eventThroughput.labels(topic).inc();
+                callbackTimer();
+              });
             }
           },
         });
@@ -234,6 +330,11 @@ const event = {
       if (!subscribedTopics.has(type)) {
         await sharedConsumer.subscribe({ topic: type, fromBeginning: false });
         subscribedTopics.add(type);
+
+        // Update backlog metrics immediately after subscribing to a new topic
+        setTimeout(() => {
+          updateKafkaBacklogMetrics();
+        }, 1000);
       }
     }
 
@@ -255,6 +356,8 @@ const event = {
   },
 
   async disconnect() {
+    event.stopBacklogMonitoring();
+
     if (socket) {
       socket.disconnect();
       socket = null;
@@ -266,6 +369,7 @@ const event = {
 
       subscribedTopics.clear();
       kafka = null;
+      kafkaGroupId = null;
     }
 
     Object.keys(callbacks).forEach((key) => delete callbacks[key]);
