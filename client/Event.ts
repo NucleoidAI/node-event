@@ -111,7 +111,7 @@ const updateKafkaBacklogMetrics = async () => {
   const admin = kafka.admin();
   await admin.connect();
 
-  for (const topic of subscribedTopics) {
+  for (const topic of Array.from(subscribedTopics)) {
     // Get consumer group offsets
     const offsetsResponse = await admin.fetchOffsets({
       groupId: kafkaGroupId,
