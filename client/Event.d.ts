@@ -1,3 +1,4 @@
+import * as client from "prom-client";
 interface BaseInitOptions {
     type: "inMemory" | "socket" | "kafka";
 }
@@ -16,9 +17,10 @@ interface KafkaOptions extends BaseInitOptions {
 type InitOptions = InMemoryOptions | KafkaOptions;
 type Callback<T = any> = (payload: T) => void;
 declare const event: {
-    init(options: InitOptions): Promise<void>;
+    init(options: InitOptions): void;
     publish<T = any>(...args: [...string[], T]): Promise<void>;
     subscribe<T = any>(type: string, callback: Callback<T>): Promise<() => void>;
+    restartKafkaConsumer(): Promise<void>;
     disconnect(): Promise<void>;
 };
-export { event };
+export { event, client };

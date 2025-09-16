@@ -9,6 +9,7 @@ let kafkaGroupId: string | null = null;
 let sharedConsumer: Consumer | null = null;
 let subscribedTopics: Set<string> = new Set();
 let backlogMonitoringInterval: NodeJS.Timeout | null = null;
+let isConsumerRunning = false;
 
 const callbacks: Record<string, Set<Callback>> = {};
 
@@ -306,35 +307,11 @@ const event = {
     if (socket) {
       socket.emit("subscribe", type);
     } else if (kafka) {
-      if (!sharedConsumer) {
-        sharedConsumer = kafka.consumer({ groupId: kafkaGroupId! });
-        await sharedConsumer.connect();
-        await sharedConsumer.run({
-          eachMessage: async ({ topic, partition, message }) => {
-            if (callbacks[topic]) {
-              const payload = JSON.parse(message.value?.toString() || "{}");
-              callbacks[topic].forEach((cb) => {
-                const callbackTimer = callbackProcessingDuration
-                  .labels(topic)
-                  .startTimer();
-
-                cb(payload);
-                eventThroughput.labels(topic).inc();
-                callbackTimer();
-              });
-            }
-          },
-        });
-      }
-
-      if (!subscribedTopics.has(type)) {
-        await sharedConsumer.subscribe({ topic: type, fromBeginning: false });
+      const wasNewTopic = !subscribedTopics.has(type);
+      if (wasNewTopic) {
         subscribedTopics.add(type);
-
-        // Update backlog metrics immediately after subscribing to a new topic
-        setTimeout(() => {
-          updateKafkaBacklogMetrics();
-        }, 1000);
+        
+        await this.restartKafkaConsumer();
       }
     }
 
@@ -355,6 +332,53 @@ const event = {
     };
   },
 
+  async restartKafkaConsumer() {
+    if (!kafka || subscribedTopics.size === 0) return;
+
+    if (sharedConsumer && isConsumerRunning) {
+      console.log("Stopping existing Kafka consumer...");
+      await sharedConsumer.stop();
+      await sharedConsumer.disconnect();
+      sharedConsumer = null;
+      isConsumerRunning = false;
+    }
+
+    console.log(`Starting Kafka consumer with topics: ${Array.from(subscribedTopics).join(", ")}`);
+    sharedConsumer = kafka.consumer({ groupId: kafkaGroupId! });
+    await sharedConsumer.connect();
+    
+    await sharedConsumer.subscribe({ 
+      topics: Array.from(subscribedTopics), 
+      fromBeginning: false 
+    });
+
+    await sharedConsumer.run({
+      partitionsConsumedConcurrently: 10,
+      eachMessage: async ({ topic, partition, message }) => {
+        if (callbacks[topic]) {
+          try {
+            const payload = JSON.parse(message.value?.toString() || "{}");
+            const callbackTimer = callbackProcessingDuration
+              .labels(topic)
+              .startTimer();
+            
+            callbacks[topic].forEach((cb) => {
+              cb(payload);
+              eventThroughput.labels(topic).inc();
+            });
+            
+            callbackTimer();
+          } catch (error) {
+            console.error(`Error processing message for topic ${topic}:`, error);
+            eventPublishErrors.labels(topic, "processing_error").inc();
+          }
+        }
+      },
+    });
+    
+    isConsumerRunning = true;
+  },
+
   async disconnect() {
     event.stopBacklogMonitoring();
 
@@ -362,9 +386,11 @@ const event = {
       socket.disconnect();
       socket = null;
     } else if (kafka) {
-      if (sharedConsumer) {
+      if (sharedConsumer && isConsumerRunning) {
+        await sharedConsumer.stop();
         await sharedConsumer.disconnect();
         sharedConsumer = null;
+        isConsumerRunning = false;
       }
 
       subscribedTopics.clear();
@@ -376,4 +402,4 @@ const event = {
   },
 };
 
-export { event };
+export { event, client };

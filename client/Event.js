@@ -36,71 +36,113 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.event = void 0;
+exports.client = exports.event = void 0;
+var client = require("prom-client");
+exports.client = client;
 var kafkajs_1 = require("kafkajs");
 var socket_io_client_1 = require("socket.io-client");
 var socket = null;
 var kafka = null;
-var kafkaAdmin = null;
 var kafkaGroupId = null;
-var activeConsumers = new Map();
+var sharedConsumer = null;
+var subscribedTopics = new Set();
+var isConsumerRunning = false;
 var callbacks = {};
+var eventPublishCounter = new client.Counter({
+    name: "events_published_total",
+    help: "Total number of events published",
+    labelNames: ["event_type"],
+});
+var eventSubscriptionGauge = new client.Gauge({
+    name: "active_event_subscriptions",
+    help: "Number of active event subscriptions",
+    labelNames: ["event_type"],
+});
+var eventPublishDuration = new client.Histogram({
+    name: "event_publish_duration_seconds",
+    help: "Time taken to publish events",
+    labelNames: ["event_type"],
+    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+});
+// Track payload size for analysis
+var eventPayloadSize = new client.Histogram({
+    name: "event_payload_size_bytes",
+    help: "Size of event payloads in bytes",
+    labelNames: ["event_type"],
+    buckets: [10, 100, 1000, 10000, 100000, 1000000],
+});
+// Track error rates
+var eventPublishErrors = new client.Counter({
+    name: "event_publish_errors_total",
+    help: "Total number of event publish errors",
+    labelNames: ["event_type", "error_type"],
+});
+// Track callback processing duration
+var callbackProcessingDuration = new client.Histogram({
+    name: "event_callback_duration_seconds",
+    help: "Time taken to process event callbacks",
+    labelNames: ["event_type"],
+    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+});
+// Track subscription rates
+var subscriptionRate = new client.Counter({
+    name: "event_subscriptions_total",
+    help: "Total number of event subscriptions created",
+    labelNames: ["event_type"],
+});
+// Track unsubscription rates
+var unsubscriptionRate = new client.Counter({
+    name: "event_unsubscriptions_total",
+    help: "Total number of event unsubscriptions",
+    labelNames: ["event_type"],
+});
+// Track throughput (events processed per second)
+var eventThroughput = new client.Counter({
+    name: "event_callbacks_processed_total",
+    help: "Total number of event callbacks processed successfully",
+    labelNames: ["event_type"],
+});
 var event = {
     init: function (options) {
-        return __awaiter(this, void 0, void 0, function () {
-            var _a, host, protocol, socketPath;
-            return __generator(this, function (_b) {
-                switch (_b.label) {
-                    case 0:
-                        _a = options.type;
-                        switch (_a) {
-                            case "inMemory": return [3 /*break*/, 1];
-                            case "kafka": return [3 /*break*/, 2];
-                        }
-                        return [3 /*break*/, 4];
-                    case 1:
-                        if (!options.host) {
-                            throw new Error("host is required for inMemory initialization");
-                        }
-                        if (!options.protocol) {
-                            throw new Error("protocol is required for inMemory initialization");
-                        }
-                        host = options.host, protocol = options.protocol;
-                        socketPath = (options === null || options === void 0 ? void 0 : options.port)
-                            ? "".concat(protocol, "://").concat(host, ":").concat(options.port)
-                            : "".concat(protocol, "://").concat(host);
-                        socket = (0, socket_io_client_1.io)(socketPath);
-                        socket.on("event", function (_a) {
-                            var type = _a.type, payload = _a.payload;
-                            if (callbacks[type]) {
-                                callbacks[type].forEach(function (cb) { return cb(payload); });
-                            }
-                        });
-                        return [3 /*break*/, 4];
-                    case 2:
-                        if (!options.clientId) {
-                            throw new Error("clientId is required for Kafka initialization");
-                        }
-                        if (!options.brokers || !Array.isArray(options.brokers) || options.brokers.length === 0) {
-                            throw new Error("brokers array is required for Kafka initialization");
-                        }
-                        if (!options.groupId) {
-                            throw new Error("groupId is required for Kafka initialization");
-                        }
-                        kafka = new kafkajs_1.Kafka({
-                            clientId: options.clientId,
-                            brokers: options.brokers,
-                        });
-                        kafkaGroupId = options.groupId;
-                        kafkaAdmin = kafka.admin();
-                        return [4 /*yield*/, kafkaAdmin.connect()];
-                    case 3:
-                        _b.sent();
-                        return [3 /*break*/, 4];
-                    case 4: return [2 /*return*/];
+        switch (options.type) {
+            case "inMemory":
+                if (!options.host) {
+                    throw new Error("host is required for inMemory initialization");
                 }
-            });
-        });
+                if (!options.protocol) {
+                    throw new Error("protocol is required for inMemory initialization");
+                }
+                var host = options.host, protocol = options.protocol;
+                var socketPath = (options === null || options === void 0 ? void 0 : options.port)
+                    ? "".concat(protocol, "://").concat(host, ":").concat(options.port)
+                    : "".concat(protocol, "://").concat(host);
+                socket = (0, socket_io_client_1.io)(socketPath);
+                socket.on("event", function (_a) {
+                    var type = _a.type, payload = _a.payload;
+                    if (callbacks[type]) {
+                        callbacks[type].forEach(function (cb) { return cb(payload); });
+                    }
+                });
+                break;
+            case "kafka":
+                if (!options.clientId) {
+                    throw new Error("clientId is required for Kafka initialization");
+                }
+                if (!options.brokers ||
+                    !Array.isArray(options.brokers) ||
+                    options.brokers.length === 0) {
+                    throw new Error("brokers array is required for Kafka initialization");
+                }
+                if (!options.groupId) {
+                    throw new Error("groupId is required for Kafka initialization");
+                }
+                kafka = new kafkajs_1.Kafka({
+                    clientId: options.clientId,
+                    brokers: options.brokers,
+                });
+                kafkaGroupId = options.groupId;
+                break;
+        }
     },
     publish: function () {
         var args = [];
@@ -108,7 +150,7 @@ var event = {
             args[_i] = arguments[_i];
         }
         return __awaiter(this, void 0, void 0, function () {
-            var payload, types, producer, _a, types_1, type;
+            var payload, types, _loop_1, _a, types_1, type;
             return __generator(this, function (_b) {
                 switch (_b.label) {
                     case 0:
@@ -117,44 +159,78 @@ var event = {
                         }
                         payload = args[args.length - 1];
                         types = args.slice(0, -1);
-                        if (!socket) return [3 /*break*/, 1];
-                        types.forEach(function (type) {
-                            socket.emit("publish", { type: type, payload: payload });
-                        });
-                        return [3 /*break*/, 8];
+                        _loop_1 = function (type) {
+                            var endTimer, payloadSize, producer;
+                            return __generator(this, function (_c) {
+                                switch (_c.label) {
+                                    case 0:
+                                        console.log("node-event", "publish", type, payload);
+                                        if (type === "__proto__" ||
+                                            type === "constructor" ||
+                                            type === "prototype") {
+                                            throw new Error("Invalid publish type");
+                                        }
+                                        endTimer = eventPublishDuration.labels(type).startTimer();
+                                        eventPublishCounter.labels(type).inc();
+                                        payloadSize = JSON.stringify(payload).length;
+                                        eventPayloadSize.labels(type).observe(payloadSize);
+                                        if (!socket) return [3 /*break*/, 1];
+                                        socket.emit("publish", { type: type, payload: payload });
+                                        return [3 /*break*/, 5];
+                                    case 1:
+                                        if (!kafka) return [3 /*break*/, 5];
+                                        producer = kafka.producer();
+                                        return [4 /*yield*/, producer.connect()];
+                                    case 2:
+                                        _c.sent();
+                                        return [4 /*yield*/, producer.send({
+                                                topic: type,
+                                                messages: [{ value: JSON.stringify(payload) }],
+                                            })];
+                                    case 3:
+                                        _c.sent();
+                                        return [4 /*yield*/, producer.disconnect()];
+                                    case 4:
+                                        _c.sent();
+                                        _c.label = 5;
+                                    case 5:
+                                        if (callbacks[type]) {
+                                            callbacks[type].forEach(function (callback) {
+                                                setTimeout(function () {
+                                                    var callbackTimer = callbackProcessingDuration
+                                                        .labels(type)
+                                                        .startTimer();
+                                                    callback(payload);
+                                                    eventThroughput.labels(type).inc();
+                                                    callbackTimer();
+                                                }, 0);
+                                            });
+                                        }
+                                        endTimer();
+                                        return [2 /*return*/];
+                                }
+                            });
+                        };
+                        _a = 0, types_1 = types;
+                        _b.label = 1;
                     case 1:
-                        if (!kafka) return [3 /*break*/, 8];
-                        producer = kafka.producer();
-                        return [4 /*yield*/, producer.connect()];
+                        if (!(_a < types_1.length)) return [3 /*break*/, 4];
+                        type = types_1[_a];
+                        return [5 /*yield**/, _loop_1(type)];
                     case 2:
                         _b.sent();
-                        _a = 0, types_1 = types;
                         _b.label = 3;
                     case 3:
-                        if (!(_a < types_1.length)) return [3 /*break*/, 6];
-                        type = types_1[_a];
-                        return [4 /*yield*/, producer.send({
-                                topic: type,
-                                messages: [{ value: JSON.stringify(payload) }],
-                            })];
-                    case 4:
-                        _b.sent();
-                        _b.label = 5;
-                    case 5:
                         _a++;
-                        return [3 /*break*/, 3];
-                    case 6: return [4 /*yield*/, producer.disconnect()];
-                    case 7:
-                        _b.sent();
-                        _b.label = 8;
-                    case 8: return [2 /*return*/];
+                        return [3 /*break*/, 1];
+                    case 4: return [2 /*return*/];
                 }
             });
         });
     },
     subscribe: function (type, callback) {
         return __awaiter(this, void 0, void 0, function () {
-            var consumer;
+            var wasNewTopic;
             var _this = this;
             return __generator(this, function (_a) {
                 switch (_a.label) {
@@ -162,115 +238,139 @@ var event = {
                         if (!callbacks[type])
                             callbacks[type] = new Set();
                         callbacks[type].add(callback);
+                        subscriptionRate.labels(type).inc();
+                        eventSubscriptionGauge.labels(type).set(callbacks[type].size);
                         if (!socket) return [3 /*break*/, 1];
                         socket.emit("subscribe", type);
-                        return [3 /*break*/, 5];
+                        return [3 /*break*/, 3];
                     case 1:
-                        if (!kafka) return [3 /*break*/, 5];
-                        consumer = activeConsumers.get(type);
-                        if (!!consumer) return [3 /*break*/, 5];
-                        consumer = kafka.consumer({
-                            groupId: "".concat(kafkaGroupId, "-").concat(type),
-                        });
-                        return [4 /*yield*/, consumer.connect()];
+                        if (!kafka) return [3 /*break*/, 3];
+                        wasNewTopic = !subscribedTopics.has(type);
+                        if (!wasNewTopic) return [3 /*break*/, 3];
+                        subscribedTopics.add(type);
+                        return [4 /*yield*/, this.restartKafkaConsumer()];
                     case 2:
                         _a.sent();
-                        return [4 /*yield*/, consumer.subscribe({ topic: type, fromBeginning: true })];
-                    case 3:
-                        _a.sent();
-                        return [4 /*yield*/, consumer.run({
-                                eachMessage: function (_a) { return __awaiter(_this, [_a], void 0, function (_b) {
-                                    var payload_1;
-                                    var _c;
-                                    var topic = _b.topic, partition = _b.partition, message = _b.message;
-                                    return __generator(this, function (_d) {
-                                        if (callbacks[topic]) {
-                                            try {
-                                                payload_1 = JSON.parse(((_c = message.value) === null || _c === void 0 ? void 0 : _c.toString()) || "{}");
-                                                callbacks[topic].forEach(function (cb) { return cb(payload_1); });
-                                            }
-                                            catch (error) {
-                                                console.error("Failed to parse message from topic ".concat(topic, ":"), error);
-                                            }
-                                        }
-                                        return [2 /*return*/];
-                                    });
-                                }); },
-                            })];
-                    case 4:
-                        _a.sent();
-                        activeConsumers.set(type, consumer);
-                        _a.label = 5;
-                    case 5: return [2 /*return*/, function () { return __awaiter(_this, void 0, void 0, function () {
-                            var consumer;
+                        _a.label = 3;
+                    case 3: return [2 /*return*/, function () { return __awaiter(_this, void 0, void 0, function () {
                             return __generator(this, function (_a) {
-                                switch (_a.label) {
-                                    case 0:
-                                        callbacks[type].delete(callback);
-                                        if (!(callbacks[type].size === 0)) return [3 /*break*/, 3];
-                                        delete callbacks[type];
-                                        if (!socket) return [3 /*break*/, 1];
+                                callbacks[type].delete(callback);
+                                unsubscriptionRate.labels(type).inc();
+                                if (callbacks[type].size === 0) {
+                                    delete callbacks[type];
+                                    eventSubscriptionGauge.labels(type).set(0);
+                                    if (socket) {
                                         socket.emit("unsubscribe", type);
-                                        return [3 /*break*/, 3];
-                                    case 1:
-                                        if (!kafka) return [3 /*break*/, 3];
-                                        consumer = activeConsumers.get(type);
-                                        if (!consumer) return [3 /*break*/, 3];
-                                        return [4 /*yield*/, consumer.disconnect()];
-                                    case 2:
-                                        _a.sent();
-                                        activeConsumers.delete(type);
-                                        _a.label = 3;
-                                    case 3: return [2 /*return*/];
+                                    }
                                 }
+                                else {
+                                    eventSubscriptionGauge.labels(type).set(callbacks[type].size);
+                                }
+                                return [2 /*return*/];
                             });
                         }); }];
                 }
             });
         });
     },
+    restartKafkaConsumer: function () {
+        return __awaiter(this, void 0, void 0, function () {
+            var _this = this;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        if (!kafka || subscribedTopics.size === 0)
+                            return [2 /*return*/];
+                        if (!(sharedConsumer && isConsumerRunning)) return [3 /*break*/, 3];
+                        console.log("Stopping existing Kafka consumer...");
+                        return [4 /*yield*/, sharedConsumer.stop()];
+                    case 1:
+                        _a.sent();
+                        return [4 /*yield*/, sharedConsumer.disconnect()];
+                    case 2:
+                        _a.sent();
+                        sharedConsumer = null;
+                        isConsumerRunning = false;
+                        _a.label = 3;
+                    case 3:
+                        console.log("Starting Kafka consumer with topics: ".concat(Array.from(subscribedTopics).join(", ")));
+                        sharedConsumer = kafka.consumer({ groupId: kafkaGroupId });
+                        return [4 /*yield*/, sharedConsumer.connect()];
+                    case 4:
+                        _a.sent();
+                        return [4 /*yield*/, sharedConsumer.subscribe({
+                                topics: Array.from(subscribedTopics),
+                                fromBeginning: false
+                            })];
+                    case 5:
+                        _a.sent();
+                        return [4 /*yield*/, sharedConsumer.run({
+                                partitionsConsumedConcurrently: 10,
+                                eachMessage: function (_a) { return __awaiter(_this, [_a], void 0, function (_b) {
+                                    var payload_1, callbackTimer;
+                                    var _c;
+                                    var topic = _b.topic, partition = _b.partition, message = _b.message;
+                                    return __generator(this, function (_d) {
+                                        if (callbacks[topic]) {
+                                            try {
+                                                payload_1 = JSON.parse(((_c = message.value) === null || _c === void 0 ? void 0 : _c.toString()) || "{}");
+                                                callbackTimer = callbackProcessingDuration
+                                                    .labels(topic)
+                                                    .startTimer();
+                                                callbacks[topic].forEach(function (cb) {
+                                                    cb(payload_1);
+                                                    eventThroughput.labels(topic).inc();
+                                                });
+                                                callbackTimer();
+                                            }
+                                            catch (error) {
+                                                console.error("Error processing message for topic ".concat(topic, ":"), error);
+                                                eventPublishErrors.labels(topic, "processing_error").inc();
+                                            }
+                                        }
+                                        return [2 /*return*/];
+                                    });
+                                }); },
+                            })];
+                    case 6:
+                        _a.sent();
+                        isConsumerRunning = true;
+                        return [2 /*return*/];
+                }
+            });
+        });
+    },
     disconnect: function () {
         return __awaiter(this, void 0, void 0, function () {
-            var consumers, _i, consumers_1, _a, topic, consumer;
-            return __generator(this, function (_b) {
-                switch (_b.label) {
+            return __generator(this, function (_a) {
+                switch (_a.label) {
                     case 0:
                         if (!socket) return [3 /*break*/, 1];
                         socket.disconnect();
                         socket = null;
-                        return [3 /*break*/, 8];
+                        return [3 /*break*/, 5];
                     case 1:
-                        if (!kafka) return [3 /*break*/, 8];
-                        consumers = Array.from(activeConsumers.entries());
-                        _i = 0, consumers_1 = consumers;
-                        _b.label = 2;
+                        if (!kafka) return [3 /*break*/, 5];
+                        if (!(sharedConsumer && isConsumerRunning)) return [3 /*break*/, 4];
+                        return [4 /*yield*/, sharedConsumer.stop()];
                     case 2:
-                        if (!(_i < consumers_1.length)) return [3 /*break*/, 5];
-                        _a = consumers_1[_i], topic = _a[0], consumer = _a[1];
-                        return [4 /*yield*/, consumer.disconnect()];
+                        _a.sent();
+                        return [4 /*yield*/, sharedConsumer.disconnect()];
                     case 3:
-                        _b.sent();
-                        _b.label = 4;
+                        _a.sent();
+                        sharedConsumer = null;
+                        isConsumerRunning = false;
+                        _a.label = 4;
                     case 4:
-                        _i++;
-                        return [3 /*break*/, 2];
-                    case 5:
-                        activeConsumers.clear();
-                        if (!kafkaAdmin) return [3 /*break*/, 7];
-                        return [4 /*yield*/, kafkaAdmin.disconnect()];
-                    case 6:
-                        _b.sent();
-                        kafkaAdmin = null;
-                        _b.label = 7;
-                    case 7:
+                        subscribedTopics.clear();
                         kafka = null;
-                        _b.label = 8;
-                    case 8:
+                        _a.label = 5;
+                    case 5:
                         Object.keys(callbacks).forEach(function (key) { return delete callbacks[key]; });
                         return [2 /*return*/];
                 }
             });
         });
-    }
+    },
 };
 exports.event = event;
