@@ -18,6 +18,9 @@ type InitOptions = InMemoryOptions | KafkaOptions;
 type Callback<T = any> = (payload: T) => void;
 declare const event: {
     init(options: InitOptions): void;
+    startBacklogMonitoring(intervalMs?: number): void;
+    stopBacklogMonitoring(): void;
+    checkBacklog(): Promise<void>;
     publish<T = any>(...args: [...string[], T]): Promise<void>;
     subscribe<T = any>(type: string, callback: Callback<T>): Promise<() => void>;
     restartKafkaConsumer(): Promise<void>;

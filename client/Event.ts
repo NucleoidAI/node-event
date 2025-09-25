@@ -362,7 +362,7 @@ const event = {
     });
 
     await sharedConsumer.run({
-      partitionsConsumedConcurrently: 10,
+      partitionsConsumedConcurrently: 1,
       eachMessage: async ({ topic, partition, message }) => {
         if (callbacks[topic]) {
           try {

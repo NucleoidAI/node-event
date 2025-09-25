@@ -46,6 +46,7 @@ var kafka = null;
 var kafkaGroupId = null;
 var sharedConsumer = null;
 var subscribedTopics = new Set();
+var backlogMonitoringInterval = null;
 var isConsumerRunning = false;
 var callbacks = {};
 var eventPublishCounter = new client.Counter({
@@ -102,6 +103,75 @@ var eventThroughput = new client.Counter({
     help: "Total number of event callbacks processed successfully",
     labelNames: ["event_type"],
 });
+var kafkaBacklogSize = new client.Gauge({
+    name: "kafka_backlog_events_total",
+    help: "Total number of events waiting to be processed",
+    labelNames: ["topic"],
+});
+// Function to update Kafka backlog metrics
+var updateKafkaBacklogMetrics = function () { return __awaiter(void 0, void 0, void 0, function () {
+    var admin, _loop_1, _i, _a, topic;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                if (!kafka || !kafkaGroupId || subscribedTopics.size === 0)
+                    return [2 /*return*/];
+                admin = kafka.admin();
+                return [4 /*yield*/, admin.connect()];
+            case 1:
+                _b.sent();
+                _loop_1 = function (topic) {
+                    var offsetsResponse, topicOffsets, totalLag, topicResponse;
+                    return __generator(this, function (_c) {
+                        switch (_c.label) {
+                            case 0: return [4 /*yield*/, admin.fetchOffsets({
+                                    groupId: kafkaGroupId,
+                                    topics: [topic],
+                                })];
+                            case 1:
+                                offsetsResponse = _c.sent();
+                                return [4 /*yield*/, admin.fetchTopicOffsets(topic)];
+                            case 2:
+                                topicOffsets = _c.sent();
+                                totalLag = 0;
+                                topicResponse = offsetsResponse.find(function (response) { return response.topic === topic; });
+                                if (topicResponse) {
+                                    // Calculate lag for each partition
+                                    topicResponse.partitions.forEach(function (partitionOffset) {
+                                        var latestOffset = topicOffsets.find(function (to) { return to.partition === partitionOffset.partition; });
+                                        if (latestOffset) {
+                                            var consumerOffset = parseInt(partitionOffset.offset);
+                                            var latestOffsetValue = parseInt(latestOffset.offset);
+                                            var lag = Math.max(0, latestOffsetValue - consumerOffset);
+                                            totalLag += lag;
+                                        }
+                                    });
+                                }
+                                kafkaBacklogSize.labels(topic).set(totalLag);
+                                console.log("Backlog for topic ".concat(topic, ": ").concat(totalLag, " messages"));
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, _a = Array.from(subscribedTopics);
+                _b.label = 2;
+            case 2:
+                if (!(_i < _a.length)) return [3 /*break*/, 5];
+                topic = _a[_i];
+                return [5 /*yield**/, _loop_1(topic)];
+            case 3:
+                _b.sent();
+                _b.label = 4;
+            case 4:
+                _i++;
+                return [3 /*break*/, 2];
+            case 5: return [4 /*yield*/, admin.disconnect()];
+            case 6:
+                _b.sent();
+                return [2 /*return*/];
+        }
+    });
+}); };
 var event = {
     init: function (options) {
         switch (options.type) {
@@ -141,8 +211,47 @@ var event = {
                     brokers: options.brokers,
                 });
                 kafkaGroupId = options.groupId;
+                // Start backlog monitoring after Kafka initialization
+                event.startBacklogMonitoring();
                 break;
         }
+    },
+    // Start backlog monitoring
+    startBacklogMonitoring: function (intervalMs) {
+        if (intervalMs === void 0) { intervalMs = 30000; }
+        if (kafka && !backlogMonitoringInterval) {
+            console.log("Starting Kafka backlog monitoring...");
+            // Run once immediately
+            updateKafkaBacklogMetrics();
+            // Set up periodic monitoring
+            backlogMonitoringInterval = setInterval(function () {
+                updateKafkaBacklogMetrics();
+            }, intervalMs);
+        }
+    },
+    // Stop backlog monitoring
+    stopBacklogMonitoring: function () {
+        if (backlogMonitoringInterval) {
+            clearInterval(backlogMonitoringInterval);
+            backlogMonitoringInterval = null;
+            console.log("Stopped Kafka backlog monitoring");
+        }
+    },
+    // Manual backlog check
+    checkBacklog: function () {
+        return __awaiter(this, void 0, void 0, function () {
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        if (!kafka) return [3 /*break*/, 2];
+                        return [4 /*yield*/, updateKafkaBacklogMetrics()];
+                    case 1:
+                        _a.sent();
+                        _a.label = 2;
+                    case 2: return [2 /*return*/];
+                }
+            });
+        });
     },
     publish: function () {
         var args = [];
@@ -150,7 +259,7 @@ var event = {
             args[_i] = arguments[_i];
         }
         return __awaiter(this, void 0, void 0, function () {
-            var payload, types, _loop_1, _a, types_1, type;
+            var payload, types, _loop_2, _a, types_1, type;
             return __generator(this, function (_b) {
                 switch (_b.label) {
                     case 0:
@@ -159,7 +268,7 @@ var event = {
                         }
                         payload = args[args.length - 1];
                         types = args.slice(0, -1);
-                        _loop_1 = function (type) {
+                        _loop_2 = function (type) {
                             var endTimer, payloadSize, producer;
                             return __generator(this, function (_c) {
                                 switch (_c.label) {
@@ -192,6 +301,7 @@ var event = {
                                         return [4 /*yield*/, producer.disconnect()];
                                     case 4:
                                         _c.sent();
+                                        setTimeout(function () { return updateKafkaBacklogMetrics(); }, 500);
                                         _c.label = 5;
                                     case 5:
                                         if (callbacks[type]) {
@@ -216,7 +326,7 @@ var event = {
                     case 1:
                         if (!(_a < types_1.length)) return [3 /*break*/, 4];
                         type = types_1[_a];
-                        return [5 /*yield**/, _loop_1(type)];
+                        return [5 /*yield**/, _loop_2(type)];
                     case 2:
                         _b.sent();
                         _b.label = 3;
@@ -251,6 +361,9 @@ var event = {
                         return [4 /*yield*/, this.restartKafkaConsumer()];
                     case 2:
                         _a.sent();
+                        setTimeout(function () {
+                            updateKafkaBacklogMetrics();
+                        }, 1000);
                         _a.label = 3;
                     case 3: return [2 /*return*/, function () { return __awaiter(_this, void 0, void 0, function () {
                             return __generator(this, function (_a) {
@@ -300,12 +413,12 @@ var event = {
                         _a.sent();
                         return [4 /*yield*/, sharedConsumer.subscribe({
                                 topics: Array.from(subscribedTopics),
-                                fromBeginning: false
+                                fromBeginning: false,
                             })];
                     case 5:
                         _a.sent();
                         return [4 /*yield*/, sharedConsumer.run({
-                                partitionsConsumedConcurrently: 10,
+                                partitionsConsumedConcurrently: 1,
                                 eachMessage: function (_a) { return __awaiter(_this, [_a], void 0, function (_b) {
                                     var payload_1, callbackTimer;
                                     var _c;
@@ -345,6 +458,7 @@ var event = {
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
+                        event.stopBacklogMonitoring();
                         if (!socket) return [3 /*break*/, 1];
                         socket.disconnect();
                         socket = null;
@@ -364,6 +478,7 @@ var event = {
                     case 4:
                         subscribedTopics.clear();
                         kafka = null;
+                        kafkaGroupId = null;
                         _a.label = 5;
                     case 5:
                         Object.keys(callbacks).forEach(function (key) { return delete callbacks[key]; });
