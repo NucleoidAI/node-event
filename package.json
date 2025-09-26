@@ -52,9 +52,9 @@
       "types": "./src/Event.d.ts"
     },
     "./client": {
-      "import": "./client/Event.js",
-      "require": "./client/Event.js",
-      "types": "./client/Event.d.ts"
+      "import": "./client/index.js",
+      "require": "./client/index.js",
+      "types": "./client/index.d.ts"
     },
     "./server": {
       "import": "./server/server.js",

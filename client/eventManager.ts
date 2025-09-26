@@ -1,0 +1,179 @@
+import { Callback, EventAdapter, InitOptions } from "./types/types";
+
+import { EventMetrics } from "./metrics";
+import { KafkaAdapter } from "./adapters/KafkaAdapter";
+import { SocketAdapter } from "./adapters/SocketAdapter";
+
+export class EventManager {
+  private adapter: EventAdapter | null = null;
+  private callbacks: Map<string, Set<Callback>> = new Map();
+  private metrics = new EventMetrics();
+  private backlogInterval: NodeJS.Timeout | null = null;
+
+  async init(options: InitOptions): Promise<void> {
+    if (this.adapter) {
+      await this.disconnect();
+    }
+
+    switch (options.type) {
+      case "inMemory":
+        this.adapter = new SocketAdapter({
+          host: options.host,
+          port: options.port,
+          protocol: options.protocol,
+        });
+        break;
+
+      case "kafka":
+        this.adapter = new KafkaAdapter({
+          clientId: options.clientId,
+          brokers: options.brokers,
+          groupId: options.groupId,
+        });
+        this.startBacklogMonitoring();
+        break;
+
+      default:
+        throw new Error(`Unknown adapter type: ${(options as any).type}`);
+    }
+
+    await this.adapter.connect();
+    
+    this.adapter.onMessage((type, payload) => {
+      this.handleIncomingMessage(type, payload);
+    });
+  }
+
+  async publish<T = any>(...args: [...string[], T]): Promise<void> {
+    if (args.length < 2) {
+      throw new Error("publish requires at least one event type and a payload");
+    }
+
+    if (!this.adapter) {
+      throw new Error("Event system not initialized");
+    }
+
+    const payload = args[args.length - 1];
+    const types = args.slice(0, -1) as string[];
+
+    for (const type of types) {
+      this.validateEventType(type);
+      
+      const payloadSize = JSON.stringify(payload).length;
+      const endTimer = this.metrics.recordPublish(type, payloadSize);
+
+      try {
+        await this.adapter.publish(type, payload);
+
+        this.executeCallbacks(type, payload);
+
+        endTimer();
+      } catch (error) {
+        this.metrics.recordPublishError(type, "publish_error");
+        endTimer();
+        throw error;
+      }
+    }
+  }
+
+  async subscribe<T = any>(type: string, callback: Callback<T>): Promise<() => void> {
+    if (!this.callbacks.has(type)) {
+      this.callbacks.set(type, new Set());
+    }
+
+    const callbackSet = this.callbacks.get(type)!;
+    callbackSet.add(callback);
+
+    this.metrics.updateSubscriptions(type, callbackSet.size);
+
+    if (this.adapter && callbackSet.size === 1) {
+      await this.adapter.subscribe(type);
+    }
+
+    return async () => {
+      callbackSet.delete(callback);
+      
+      if (callbackSet.size === 0) {
+        this.callbacks.delete(type);
+        if (this.adapter) {
+          await this.adapter.unsubscribe(type);
+        }
+      }
+
+      this.metrics.updateSubscriptions(type, callbackSet.size);
+    };
+  }
+
+  async disconnect(): Promise<void> {
+    this.stopBacklogMonitoring();
+
+    if (this.adapter) {
+      await this.adapter.disconnect();
+      this.adapter = null;
+    }
+
+    this.callbacks.clear();
+  }
+
+  private handleIncomingMessage(type: string, payload: any): void {
+    this.executeCallbacks(type, payload);
+  }
+
+  private executeCallbacks(type: string, payload: any): void {
+    const callbackSet = this.callbacks.get(type);
+    if (!callbackSet) return;
+
+    callbackSet.forEach(callback => {
+      setTimeout(() => {
+        const endTimer = this.metrics.recordCallback(type);
+        try {
+          callback(payload);
+        } catch (error) {
+          console.error(`Error in callback for ${type}:`, error);
+        }
+        endTimer();
+      }, 0);
+    });
+  }
+
+  private validateEventType(type: string): void {
+    if (type === "__proto__" || type === "constructor" || type === "prototype") {
+      throw new Error("Invalid event type");
+    }
+  }
+
+  private startBacklogMonitoring(intervalMs: number = 30000): void {
+    if (!(this.adapter instanceof KafkaAdapter)) return;
+
+    this.updateBacklogMetrics();
+
+    this.backlogInterval = setInterval(() => {
+      this.updateBacklogMetrics();
+    }, intervalMs);
+  }
+
+  private stopBacklogMonitoring(): void {
+    if (this.backlogInterval) {
+      clearInterval(this.backlogInterval);
+      this.backlogInterval = null;
+    }
+  }
+
+  private async updateBacklogMetrics(): Promise<void> {
+    if (!(this.adapter instanceof KafkaAdapter)) return;
+
+    try {
+      const backlog = await this.adapter.getBacklog();
+      backlog.forEach((size, topic) => {
+        this.metrics.updateKafkaBacklog(topic, size);
+        console.log(`Backlog for topic ${topic}: ${size} messages`);
+      });
+    } catch (error) {
+      console.error("Error updating backlog metrics:", error);
+    }
+  }
+
+  async checkBacklog(): Promise<void> {
+    await this.updateBacklogMetrics();
+  }
+}
