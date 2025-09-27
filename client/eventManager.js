@@ -1,0 +1,151 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.EventManager = void 0;
+const metrics_1 = require("./metrics");
+const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
+const SocketAdapter_1 = require("./adapters/SocketAdapter");
+class EventManager {
+    adapter = null;
+    callbacks = new Map();
+    metrics = new metrics_1.EventMetrics();
+    backlogInterval = null;
+    async init(options) {
+        if (this.adapter) {
+            await this.disconnect();
+        }
+        switch (options.type) {
+            case "inMemory":
+                this.adapter = new SocketAdapter_1.SocketAdapter({
+                    host: options.host,
+                    port: options.port,
+                    protocol: options.protocol,
+                });
+                break;
+            case "kafka":
+                this.adapter = new KafkaAdapter_1.KafkaAdapter({
+                    clientId: options.clientId,
+                    brokers: options.brokers,
+                    groupId: options.groupId,
+                });
+                this.startBacklogMonitoring();
+                break;
+            default:
+                throw new Error(`Unknown adapter type: ${options.type}`);
+        }
+        await this.adapter.connect();
+        this.adapter.onMessage((type, payload) => {
+            this.handleIncomingMessage(type, payload);
+        });
+    }
+    async publish(...args) {
+        if (args.length < 2) {
+            throw new Error("publish requires at least one event type and a payload");
+        }
+        if (!this.adapter) {
+            throw new Error("Event system not initialized");
+        }
+        const payload = args[args.length - 1];
+        const types = args.slice(0, -1);
+        for (const type of types) {
+            this.validateEventType(type);
+            const payloadSize = JSON.stringify(payload).length;
+            const endTimer = this.metrics.recordPublish(type, payloadSize);
+            try {
+                await this.adapter.publish(type, payload);
+                this.executeCallbacks(type, payload);
+                endTimer();
+            }
+            catch (error) {
+                this.metrics.recordPublishError(type, "publish_error");
+                endTimer();
+                throw error;
+            }
+        }
+    }
+    async subscribe(type, callback) {
+        if (!this.callbacks.has(type)) {
+            this.callbacks.set(type, new Set());
+        }
+        const callbackSet = this.callbacks.get(type);
+        callbackSet.add(callback);
+        this.metrics.updateSubscriptions(type, callbackSet.size);
+        if (this.adapter && callbackSet.size === 1) {
+            await this.adapter.subscribe(type);
+        }
+        return async () => {
+            callbackSet.delete(callback);
+            if (callbackSet.size === 0) {
+                this.callbacks.delete(type);
+                if (this.adapter) {
+                    await this.adapter.unsubscribe(type);
+                }
+            }
+            this.metrics.updateSubscriptions(type, callbackSet.size);
+        };
+    }
+    async disconnect() {
+        this.stopBacklogMonitoring();
+        if (this.adapter) {
+            await this.adapter.disconnect();
+            this.adapter = null;
+        }
+        this.callbacks.clear();
+    }
+    handleIncomingMessage(type, payload) {
+        this.executeCallbacks(type, payload);
+    }
+    executeCallbacks(type, payload) {
+        const callbackSet = this.callbacks.get(type);
+        if (!callbackSet)
+            return;
+        callbackSet.forEach(callback => {
+            setTimeout(() => {
+                const endTimer = this.metrics.recordCallback(type);
+                try {
+                    callback(payload);
+                }
+                catch (error) {
+                    console.error(`Error in callback for ${type}:`, error);
+                }
+                endTimer();
+            }, 0);
+        });
+    }
+    validateEventType(type) {
+        if (type === "__proto__" || type === "constructor" || type === "prototype") {
+            throw new Error("Invalid event type");
+        }
+    }
+    startBacklogMonitoring(intervalMs = 30000) {
+        if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
+            return;
+        this.updateBacklogMetrics();
+        this.backlogInterval = setInterval(() => {
+            this.updateBacklogMetrics();
+        }, intervalMs);
+    }
+    stopBacklogMonitoring() {
+        if (this.backlogInterval) {
+            clearInterval(this.backlogInterval);
+            this.backlogInterval = null;
+        }
+    }
+    async updateBacklogMetrics() {
+        if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
+            return;
+        try {
+            const backlog = await this.adapter.getBacklog();
+            backlog.forEach((size, topic) => {
+                this.metrics.updateKafkaBacklog(topic, size);
+                console.log(`Backlog for topic ${topic}: ${size} messages`);
+            });
+        }
+        catch (error) {
+            console.error("Error updating backlog metrics:", error);
+        }
+    }
+    async checkBacklog() {
+        await this.updateBacklogMetrics();
+    }
+}
+exports.EventManager = EventManager;
