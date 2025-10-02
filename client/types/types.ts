@@ -1,12 +1,12 @@
-export type Callback<T = any> = (payload: T) => void;
+export type Callback<T = object> = (payload: T) => void;
 
 export interface EventAdapter {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  publish<T = any>(type: string, payload: T): Promise<void>;
+  publish(type: string, payload: object): Promise<void>;
   subscribe(type: string): Promise<void>;
   unsubscribe(type: string): Promise<void>;
-  onMessage(handler: (type: string, payload: any) => void): void;
+  onMessage(handler: (type: string, payload: object) => void): void;
 }
 
 export interface BaseInitOptions {

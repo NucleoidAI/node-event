@@ -14,10 +14,10 @@ export declare class KafkaAdapter implements EventAdapter {
     });
     connect(): Promise<void>;
     disconnect(): Promise<void>;
-    publish<T = any>(type: string, payload: T): Promise<void>;
+    publish<T = object>(type: string, payload: T): Promise<void>;
     subscribe(type: string): Promise<void>;
     unsubscribe(type: string): Promise<void>;
-    onMessage(handler: (type: string, payload: any) => void): void;
+    onMessage(handler: (type: string, payload: object) => void): void;
     private restartConsumer;
     getBacklog(): Promise<Map<string, number>>;
 }

@@ -4,7 +4,7 @@ import { EventAdapter } from "../types/types";
 
 export class SocketAdapter implements EventAdapter {
   private socket: Socket | null = null;
-  private messageHandler?: (type: string, payload: any) => void;
+  private messageHandler?: (type: string, payload: object) => void;
 
   constructor(private readonly options: {
     host: string;
@@ -18,7 +18,7 @@ export class SocketAdapter implements EventAdapter {
     
     this.socket = io(socketPath);
     
-    this.socket.on("event", ({ type, payload }: { type: string; payload: any }) => {
+    this.socket.on("event", ({ type, payload }: { type: string; payload: object }) => {
       if (this.messageHandler) {
         this.messageHandler(type, payload);
       }
@@ -32,7 +32,7 @@ export class SocketAdapter implements EventAdapter {
     }
   }
 
-  async publish<T = any>(type: string, payload: T): Promise<void> {
+  async publish(type: string, payload: object): Promise<void> {
     if (!this.socket) {
       throw new Error("Socket not connected");
     }
@@ -53,7 +53,7 @@ export class SocketAdapter implements EventAdapter {
     this.socket.emit("unsubscribe", type);
   }
 
-  onMessage(handler: (type: string, payload: any) => void): void {
+  onMessage(handler: (type: string, payload: object) => void): void {
     this.messageHandler = handler;
   }
 }

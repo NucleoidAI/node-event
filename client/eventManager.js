@@ -30,7 +30,7 @@ class EventManager {
                 this.startBacklogMonitoring();
                 break;
             default:
-                throw new Error(`Unknown adapter type: ${options.type}`);
+                throw new Error(`Unknown adapter type`);
         }
         await this.adapter.connect();
         this.adapter.onMessage((type, payload) => {
@@ -38,28 +38,27 @@ class EventManager {
         });
     }
     async publish(...args) {
-        if (args.length < 2) {
+        if (args.length < 1) {
             throw new Error("publish requires at least one event type and a payload");
         }
         if (!this.adapter) {
             throw new Error("Event system not initialized");
         }
         const payload = args[args.length - 1];
-        const types = args.slice(0, -1);
-        for (const type of types) {
-            this.validateEventType(type);
-            const payloadSize = JSON.stringify(payload).length;
-            const endTimer = this.metrics.recordPublish(type, payloadSize);
-            try {
-                await this.adapter.publish(type, payload);
-                this.executeCallbacks(type, payload);
-                endTimer();
-            }
-            catch (error) {
-                this.metrics.recordPublishError(type, "publish_error");
-                endTimer();
-                throw error;
-            }
+        const type = args.slice(0, -1);
+        const mergedType = type.join('_');
+        this.validateEventType(mergedType);
+        const payloadSize = JSON.stringify(payload).length;
+        const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
+        try {
+            await this.adapter.publish(mergedType, payload);
+            this.executeCallbacks(mergedType, payload);
+            endTimer();
+        }
+        catch (error) {
+            this.metrics.recordPublishError(mergedType, "publish_error");
+            endTimer();
+            throw error;
         }
     }
     async subscribe(type, callback) {

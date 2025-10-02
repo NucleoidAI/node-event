@@ -6,7 +6,7 @@ export class KafkaAdapter implements EventAdapter {
   private kafka: Kafka;
   private consumer: Consumer | null = null;
   private producer: Producer | null = null;
-  private messageHandler?: (type: string, payload: any) => void;
+  private messageHandler?: (type: string, payload: object) => void;
   private subscribedTopics = new Set<string>();
   private isRunning = false;
 
@@ -39,7 +39,7 @@ export class KafkaAdapter implements EventAdapter {
     this.subscribedTopics.clear();
   }
 
-  async publish<T = any>(type: string, payload: T): Promise<void> {
+  async publish<T = object>(type: string, payload: T): Promise<void> {
     const producer = this.kafka.producer();
     await producer.connect();
 
@@ -72,7 +72,7 @@ export class KafkaAdapter implements EventAdapter {
     }
   }
 
-  onMessage(handler: (type: string, payload: any) => void): void {
+  onMessage(handler: (type: string, payload: object) => void): void {
     this.messageHandler = handler;
   }
 

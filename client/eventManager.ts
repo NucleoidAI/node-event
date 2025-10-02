@@ -34,7 +34,7 @@ export class EventManager {
         break;
 
       default:
-        throw new Error(`Unknown adapter type: ${(options as any).type}`);
+        throw new Error(`Unknown adapter type`);
     }
 
     await this.adapter.connect();
@@ -45,34 +45,33 @@ export class EventManager {
   }
 
   async publish<T extends object = object>(...args: [...string[], T]): Promise<void> {
-  if (args.length < 2) {
+    if (args.length < 1) {
       throw new Error("publish requires at least one event type and a payload");
     }
 
     if (!this.adapter) {
       throw new Error("Event system not initialized");
     }
+    
+    const payload = args[args.length - 1] as T;
+    const type = args.slice(0, -1) as string[];
+  
+    const mergedType = type.join('_');
+    this.validateEventType(mergedType);
+  
+    const payloadSize = JSON.stringify(payload).length;
+    const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
 
-    const payload = args[args.length - 1];
-    const types = args.slice(0, -1) as string[];
+    try {
+      await this.adapter.publish(mergedType, payload);
 
-    for (const type of types) {
-      this.validateEventType(type);
-      
-      const payloadSize = JSON.stringify(payload).length;
-      const endTimer = this.metrics.recordPublish(type, payloadSize);
+      this.executeCallbacks(mergedType, payload);
 
-      try {
-        await this.adapter.publish(type, payload);
-
-        this.executeCallbacks(type, payload);
-
-        endTimer();
-      } catch (error) {
-        this.metrics.recordPublishError(type, "publish_error");
-        endTimer();
-        throw error;
-      }
+      endTimer();
+    } catch (error) {
+      this.metrics.recordPublishError(mergedType, "publish_error");
+      endTimer();
+      throw error;
     }
   }
 
@@ -82,7 +81,7 @@ export class EventManager {
     }
 
     const callbackSet = this.callbacks.get(type)!;
-    callbackSet.add(callback);
+    callbackSet.add(callback as Callback);
 
     this.metrics.updateSubscriptions(type, callbackSet.size);
 
@@ -91,7 +90,7 @@ export class EventManager {
     }
 
     return async () => {
-      callbackSet.delete(callback);
+      callbackSet.delete(callback as Callback);
       
       if (callbackSet.size === 0) {
         this.callbacks.delete(type);
@@ -115,11 +114,11 @@ export class EventManager {
     this.callbacks.clear();
   }
 
-  private handleIncomingMessage(type: string, payload: any): void {
+  private handleIncomingMessage(type: string, payload: object): void {
     this.executeCallbacks(type, payload);
   }
 
-  private executeCallbacks(type: string, payload: any): void {
+  private executeCallbacks(type: string, payload: object): void {
     const callbackSet = this.callbacks.get(type);
     if (!callbackSet) return;
 

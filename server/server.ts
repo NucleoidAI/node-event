@@ -29,7 +29,7 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('publish', ({ type, payload }: { type: string; payload: any }) => {
+  socket.on('publish', ({ type, payload }: { type: string; payload: object }) => {
     console.log(`Publish: ${type}`, payload);
     if (subscriptions[type]) {
       subscriptions[type].forEach((sid) => {
