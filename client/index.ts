@@ -1,5 +1,6 @@
 import * as client from "prom-client";
 
+import { Callback } from "./types/types";
 import { EventManager } from "./eventManager";
 import { EventMetrics } from "./metrics";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
@@ -9,8 +10,8 @@ const manager = new EventManager();
 
 export const event = {
   init: (options: any) => manager.init(options),
-  publish: <T = any>(...args: [...string[], T]) => manager.publish(...args),
-  subscribe: (type: string, callback: any) => manager.subscribe(type, callback),
+  publish: <T extends object = object>(...args: [...string[], T]) => manager.publish(...args),
+  subscribe: <T extends object = object>(type: string, callback: Callback<T>) => manager.subscribe(type, callback),
   disconnect: () => manager.disconnect(),
   checkBacklog: () => manager.checkBacklog(),
   

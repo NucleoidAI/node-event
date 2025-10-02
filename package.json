@@ -1,6 +1,6 @@
 {
   "name": "node-event-test-package",
-  "version": "1.1.16",
+  "version": "1.1.20",
   "description": "Event-driven Message Broker",
   "main": "index.js",
   "keywords": [

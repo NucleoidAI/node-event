@@ -5,8 +5,8 @@ export declare class EventManager {
     private metrics;
     private backlogInterval;
     init(options: InitOptions): Promise<void>;
-    publish<T = any>(...args: [...string[], T]): Promise<void>;
-    subscribe<T = any>(type: string, callback: Callback<T>): Promise<() => void>;
+    publish<T extends object = object>(...args: [...string[], T]): Promise<void>;
+    subscribe<T extends object = object>(type: string, callback: Callback<T>): Promise<() => void>;
     disconnect(): Promise<void>;
     private handleIncomingMessage;
     private executeCallbacks;

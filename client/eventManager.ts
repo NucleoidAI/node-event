@@ -44,8 +44,8 @@ export class EventManager {
     });
   }
 
-  async publish<T = any>(...args: [...string[], T]): Promise<void> {
-    if (args.length < 2) {
+  async publish<T extends object = object>(...args: [...string[], T]): Promise<void> {
+  if (args.length < 2) {
       throw new Error("publish requires at least one event type and a payload");
     }
 
@@ -76,7 +76,7 @@ export class EventManager {
     }
   }
 
-  async subscribe<T = any>(type: string, callback: Callback<T>): Promise<() => void> {
+  async subscribe<T extends object = object>(type: string, callback: Callback<T>): Promise<() => void> {
     if (!this.callbacks.has(type)) {
       this.callbacks.set(type, new Set());
     }
