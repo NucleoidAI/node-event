@@ -4,6 +4,25 @@ import { EventMetrics } from "./metrics";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
 
+const KAFKA_TOPICS = [
+  "KNOWLEDGE_CREATED",
+  "MESSAGE_USER_MESSAGED",
+  "SESSION_USER_MESSAGED",
+  "TASK_CREATED",
+  "STEP_ADDED",
+  "STEP_COMPLETED",
+  "MESSAGE_USER_MESSAGED",
+  "MESSAGE_ASSISTANT_MESSAGED",
+  "SESSION_INITIATED",
+  "SESSION_USER_MESSAGED",
+  "SESSION_AI_MESSAGED",
+  "SUPERVISING_RAISED",
+  "SUPERVISING_ANSWERED",
+  "TASK_COMPLETED",
+  "KNOWLEDGES_LOADED",
+  "MESSAGES_LOADED",
+];
+
 export class EventManager {
   private adapter: EventAdapter | null = null;
   private callbacks: Map<string, Set<Callback>> = new Map();
@@ -29,6 +48,7 @@ export class EventManager {
           clientId: options.clientId,
           brokers: options.brokers,
           groupId: options.groupId,
+          topics: KAFKA_TOPICS,
         });
         this.startBacklogMonitoring();
         break;
@@ -38,13 +58,15 @@ export class EventManager {
     }
 
     await this.adapter.connect();
-    
+
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });
   }
 
-  async publish<T extends object = object>(...args: [...string[], T]): Promise<void> {
+  async publish<T extends object = object>(
+    ...args: [...string[], T]
+  ): Promise<void> {
     if (args.length < 1) {
       throw new Error("publish requires at least one event type and a payload");
     }
@@ -52,13 +74,13 @@ export class EventManager {
     if (!this.adapter) {
       throw new Error("Event system not initialized");
     }
-    
+
     const payload = args[args.length - 1] as T;
     const type = args.slice(0, -1) as string[];
-  
-    const mergedType = type.join('_');
+
+    const mergedType = type.join("_");
     this.validateEventType(mergedType);
-  
+
     const payloadSize = JSON.stringify(payload).length;
     const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
 
@@ -75,7 +97,10 @@ export class EventManager {
     }
   }
 
-  async subscribe<T extends object = object>(type: string, callback: Callback<T>): Promise<() => void> {
+  async subscribe<T extends object = object>(
+    type: string,
+    callback: Callback<T>
+  ): Promise<() => void> {
     if (!this.callbacks.has(type)) {
       this.callbacks.set(type, new Set());
     }
@@ -91,7 +116,7 @@ export class EventManager {
 
     return async () => {
       callbackSet.delete(callback as Callback);
-      
+
       if (callbackSet.size === 0) {
         this.callbacks.delete(type);
         if (this.adapter) {
@@ -120,9 +145,9 @@ export class EventManager {
 
   private executeCallbacks(type: string, payload: object): void {
     const callbackSet = this.callbacks.get(type);
-    if (!callbackSet) return;
+    if (!callbackSet) return; // No callbacks for this topic - message ignored
 
-    callbackSet.forEach(callback => {
+    callbackSet.forEach((callback) => {
       setTimeout(() => {
         const endTimer = this.metrics.recordCallback(type);
         try {
@@ -136,7 +161,11 @@ export class EventManager {
   }
 
   private validateEventType(type: string): void {
-    if (type === "__proto__" || type === "constructor" || type === "prototype") {
+    if (
+      type === "__proto__" ||
+      type === "constructor" ||
+      type === "prototype"
+    ) {
       throw new Error("Invalid event type");
     }
   }

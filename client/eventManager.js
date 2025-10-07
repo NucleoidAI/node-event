@@ -4,6 +4,24 @@ exports.EventManager = void 0;
 const metrics_1 = require("./metrics");
 const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
 const SocketAdapter_1 = require("./adapters/SocketAdapter");
+const KAFKA_TOPICS = [
+    "KNOWLEDGE_CREATED",
+    "MESSAGE_USER_MESSAGED",
+    "SESSION_USER_MESSAGED",
+    "TASK_CREATED",
+    "STEP_ADDED",
+    "STEP_COMPLETED",
+    "MESSAGE_USER_MESSAGED",
+    "MESSAGE_ASSISTANT_MESSAGED",
+    "SESSION_INITIATED",
+    "SESSION_USER_MESSAGED",
+    "SESSION_AI_MESSAGED",
+    "SUPERVISING_RAISED",
+    "SUPERVISING_ANSWERED",
+    "TASK_COMPLETED",
+    "KNOWLEDGES_LOADED",
+    "MESSAGES_LOADED",
+];
 class EventManager {
     adapter = null;
     callbacks = new Map();
@@ -26,6 +44,7 @@ class EventManager {
                     clientId: options.clientId,
                     brokers: options.brokers,
                     groupId: options.groupId,
+                    topics: KAFKA_TOPICS,
                 });
                 this.startBacklogMonitoring();
                 break;
@@ -46,7 +65,7 @@ class EventManager {
         }
         const payload = args[args.length - 1];
         const type = args.slice(0, -1);
-        const mergedType = type.join('_');
+        const mergedType = type.join("_");
         this.validateEventType(mergedType);
         const payloadSize = JSON.stringify(payload).length;
         const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
@@ -96,8 +115,8 @@ class EventManager {
     executeCallbacks(type, payload) {
         const callbackSet = this.callbacks.get(type);
         if (!callbackSet)
-            return;
-        callbackSet.forEach(callback => {
+            return; // No callbacks for this topic - message ignored
+        callbackSet.forEach((callback) => {
             setTimeout(() => {
                 const endTimer = this.metrics.recordCallback(type);
                 try {
@@ -111,7 +130,9 @@ class EventManager {
         });
     }
     validateEventType(type) {
-        if (type === "__proto__" || type === "constructor" || type === "prototype") {
+        if (type === "__proto__" ||
+            type === "constructor" ||
+            type === "prototype") {
             throw new Error("Invalid event type");
         }
     }

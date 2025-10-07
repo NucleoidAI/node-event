@@ -8,76 +8,22 @@ class KafkaAdapter {
     consumer = null;
     producer = null;
     messageHandler;
-    subscribedTopics = new Set();
-    isRunning = false;
+    topics;
     constructor(options) {
         this.options = options;
         this.kafka = new kafkajs_1.Kafka({
             clientId: options.clientId,
             brokers: options.brokers,
         });
+        this.topics = options.topics;
     }
     async connect() {
         this.producer = this.kafka.producer();
         await this.producer.connect();
-    }
-    async disconnect() {
-        if (this.consumer && this.isRunning) {
-            await this.consumer.stop();
-            await this.consumer.disconnect();
-            this.consumer = null;
-            this.isRunning = false;
-        }
-        this.subscribedTopics.clear();
-    }
-    async publish(type, payload) {
-        const producer = this.kafka.producer();
-        await producer.connect();
-        try {
-            await producer.send({
-                topic: type,
-                messages: [{ value: JSON.stringify(payload) }],
-            });
-        }
-        finally {
-            await producer.disconnect();
-        }
-    }
-    async subscribe(type) {
-        if (!this.subscribedTopics.has(type)) {
-            this.subscribedTopics.add(type);
-            await this.restartConsumer();
-        }
-    }
-    async unsubscribe(type) {
-        this.subscribedTopics.delete(type);
-        if (this.subscribedTopics.size > 0) {
-            await this.restartConsumer();
-        }
-        else if (this.consumer) {
-            await this.consumer.stop();
-            await this.consumer.disconnect();
-            this.consumer = null;
-            this.isRunning = false;
-        }
-    }
-    onMessage(handler) {
-        this.messageHandler = handler;
-    }
-    async restartConsumer() {
-        if (this.subscribedTopics.size === 0)
-            return;
-        if (this.consumer && this.isRunning) {
-            console.log("Stopping existing Kafka consumer...");
-            await this.consumer.stop();
-            await this.consumer.disconnect();
-            this.isRunning = false;
-        }
-        console.log(`Starting Kafka consumer with topics: ${Array.from(this.subscribedTopics).join(", ")}`);
         this.consumer = this.kafka.consumer({ groupId: this.options.groupId });
         await this.consumer.connect();
         await this.consumer.subscribe({
-            topics: Array.from(this.subscribedTopics),
+            topics: this.topics,
             fromBeginning: false,
         });
         await this.consumer.run({
@@ -94,16 +40,43 @@ class KafkaAdapter {
                 }
             },
         });
-        this.isRunning = true;
+        console.log(`Kafka consumer started with topics: ${this.topics.join(", ")}`);
+    }
+    async disconnect() {
+        if (this.consumer) {
+            await this.consumer.stop();
+            await this.consumer.disconnect();
+            this.consumer = null;
+        }
+        if (this.producer) {
+            await this.producer.disconnect();
+            this.producer = null;
+        }
+    }
+    async publish(type, payload) {
+        if (!this.producer) {
+            throw new Error("Producer not connected");
+        }
+        await this.producer.send({
+            topic: type,
+            messages: [{ value: JSON.stringify(payload) }],
+        });
+    }
+    async subscribe(type) {
+        // EventManager handles callback registration in memory
+    }
+    async unsubscribe(type) {
+        // EventManager handles callback removal in memory
+    }
+    onMessage(handler) {
+        this.messageHandler = handler;
     }
     async getBacklog() {
         const backlogMap = new Map();
-        if (this.subscribedTopics.size === 0)
-            return backlogMap;
         const admin = this.kafka.admin();
         await admin.connect();
         try {
-            for (const topic of this.subscribedTopics) {
+            for (const topic of this.topics) {
                 const offsetsResponse = await admin.fetchOffsets({
                     groupId: this.options.groupId,
                     topics: [topic],
