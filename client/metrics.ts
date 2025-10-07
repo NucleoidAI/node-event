@@ -1,6 +1,16 @@
 import * as client from "prom-client";
 
+export interface PushgatewayConfig {
+  url?: string;
+  jobName?: string;
+  instance?: string;
+  interval?: number;
+}
+
 export class EventMetrics {
+  private pushgatewayInterval?: NodeJS.Timeout;
+  private pushgatewayConfig?: PushgatewayConfig;
+
   private readonly publishCounter = new client.Counter({
     name: "events_published_total",
     help: "Total number of events published",
@@ -73,5 +83,67 @@ export class EventMetrics {
 
   updateKafkaBacklog(topic: string, size: number): void {
     this.kafkaBacklog.labels(topic).set(size);
+  }
+
+  startPushgateway(config: PushgatewayConfig = {}): void {
+    this.pushgatewayConfig = {
+      url: config.url || "http://localhost:9091",
+      jobName: config.jobName || "node_events",
+      instance: config.instance || "default_instance",
+      interval: config.interval || 15000,
+    };
+
+    this.stopPushgateway();
+
+    this.pushgatewayInterval = setInterval(() => {
+      this.pushMetricsToGateway();
+    }, this.pushgatewayConfig.interval);
+
+    console.log(
+      `Started pushing metrics to Pushgateway every ${this.pushgatewayConfig.interval}ms`
+    );
+  }
+
+  stopPushgateway(): void {
+    if (this.pushgatewayInterval) {
+      clearInterval(this.pushgatewayInterval);
+      this.pushgatewayInterval = undefined;
+      console.log("Stopped pushing metrics to Pushgateway");
+    }
+  }
+
+  async pushMetricsToGateway(): Promise<void> {
+    if (!this.pushgatewayConfig) {
+      throw new Error(
+        "Pushgateway not configured. Call startPushgateway() first."
+      );
+    }
+
+    try {
+      const body = await client.register.metrics();
+      let url = `${this.pushgatewayConfig.url}/metrics/job/${this.pushgatewayConfig.jobName}`;
+
+      if (this.pushgatewayConfig.instance) {
+        url += `/instance/${this.pushgatewayConfig.instance}`;
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      console.log("Metrics pushed to Pushgateway successfully");
+    } catch (err) {
+      console.error("Failed to push metrics to Pushgateway:", err);
+    }
+  }
+
+  getPushgatewayConfig(): PushgatewayConfig | undefined {
+    return this.pushgatewayConfig;
   }
 }

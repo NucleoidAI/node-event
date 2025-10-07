@@ -1,6 +1,6 @@
 import { Callback, EventAdapter, InitOptions } from "./types/types";
+import { EventMetrics, PushgatewayConfig } from "./metrics";
 
-import { EventMetrics } from "./metrics";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
 
@@ -58,7 +58,7 @@ export class EventManager {
     }
 
     await this.adapter.connect();
-
+    
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });
@@ -203,5 +203,21 @@ export class EventManager {
 
   async checkBacklog(): Promise<void> {
     await this.updateBacklogMetrics();
+  }
+
+  startPushgateway(config?: PushgatewayConfig): void {
+    this.metrics.startPushgateway(config);
+  }
+
+  stopPushgateway(): void {
+    this.metrics.stopPushgateway();
+  }
+
+  async pushMetricsToGateway(): Promise<void> {
+    await this.metrics.pushMetricsToGateway();
+  }
+
+  getPushgatewayConfig(): PushgatewayConfig | undefined {
+    return this.metrics.getPushgatewayConfig();
   }
 }
