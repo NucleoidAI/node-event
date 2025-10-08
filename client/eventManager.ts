@@ -4,17 +4,33 @@ import { EventMetrics, PushgatewayConfig } from "./metrics";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
 
+const KAFKA_TOPICS = [
+  "KNOWLEDGE_CREATED",
+  "MESSAGE_USER_MESSAGED",
+  "SESSION_USER_MESSAGED",
+  "TASK_CREATED",
+  "STEP_ADDED",
+  "STEP_COMPLETED",
+  "MESSAGE_USER_MESSAGED",
+  "MESSAGE_ASSISTANT_MESSAGED",
+  "SESSION_INITIATED",
+  "SESSION_USER_MESSAGED",
+  "SESSION_AI_MESSAGED",
+  "SUPERVISING_RAISED",
+  "SUPERVISING_ANSWERED",
+  "TASK_COMPLETED",
+  "KNOWLEDGES_LOADED",
+  "MESSAGES_LOADED",
+];
 export class EventManager {
   private adapter: EventAdapter | null = null;
   private callbacks: Map<string, Set<Callback>> = new Map();
   private metrics = new EventMetrics();
   private backlogInterval: NodeJS.Timeout | null = null;
-
   async init(options: InitOptions): Promise<void> {
     if (this.adapter) {
       await this.disconnect();
     }
-
     switch (options.type) {
       case "inMemory":
         this.adapter = new SocketAdapter({
@@ -23,7 +39,6 @@ export class EventManager {
           protocol: options.protocol,
         });
         break;
-
       case "kafka":
         this.adapter = new KafkaAdapter({
           clientId: options.clientId,
@@ -32,43 +47,33 @@ export class EventManager {
         });
         this.startBacklogMonitoring();
         break;
-
       default:
         throw new Error(`Unknown adapter type`);
     }
-
     await this.adapter.connect();
 
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });
   }
-
   async publish<T extends object = object>(
     ...args: [...string[], T]
   ): Promise<void> {
     if (args.length < 1) {
       throw new Error("publish requires at least one event type and a payload");
     }
-
     if (!this.adapter) {
       throw new Error("Event system not initialized");
     }
-
     const payload = args[args.length - 1] as T;
     const type = args.slice(0, -1) as string[];
-
     const mergedType = type.join("_");
     this.validateEventType(mergedType);
-
     const payloadSize = JSON.stringify(payload).length;
     const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
-
     try {
       await this.adapter.publish(mergedType, payload);
-
       this.executeCallbacks(mergedType, payload);
-
       endTimer();
     } catch (error) {
       this.metrics.recordPublishError(mergedType, "publish_error");
@@ -76,7 +81,6 @@ export class EventManager {
       throw error;
     }
   }
-
   async subscribe<T extends object = object>(
     type: string,
     callback: Callback<T>
@@ -125,7 +129,7 @@ export class EventManager {
 
   private executeCallbacks(type: string, payload: object): void {
     const callbackSet = this.callbacks.get(type);
-    if (!callbackSet) return;
+    if (!callbackSet) return; // No callbacks for this topic - message ignored
 
     callbackSet.forEach((callback) => {
       setTimeout(() => {
@@ -171,7 +175,7 @@ export class EventManager {
     if (!(this.adapter instanceof KafkaAdapter)) return;
 
     try {
-      const backlog = await this.adapter.getBacklog();
+      const backlog = await this.adapter.getBacklog(KAFKA_TOPICS);
       backlog.forEach((size, topic) => {
         this.metrics.updateKafkaBacklog(topic, size);
         console.log(`Backlog for topic ${topic}: ${size} messages`);

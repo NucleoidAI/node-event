@@ -7,8 +7,6 @@ export class KafkaAdapter implements EventAdapter {
   private consumer: Consumer | null = null;
   private producer: Producer | null = null;
   private messageHandler?: (type: string, payload: object) => void;
-  private subscribedTopics = new Set<string>();
-  private isRunning = false;
 
   constructor(
     private readonly options: {
@@ -26,82 +24,20 @@ export class KafkaAdapter implements EventAdapter {
   async connect(): Promise<void> {
     this.producer = this.kafka.producer();
     await this.producer.connect();
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.consumer && this.isRunning) {
-      await this.consumer.stop();
-      await this.consumer.disconnect();
-      this.consumer = null;
-      this.isRunning = false;
-    }
-
-    this.subscribedTopics.clear();
-  }
-
-  async publish<T = object>(type: string, payload: T): Promise<void> {
-    const producer = this.kafka.producer();
-    await producer.connect();
-
-    try {
-      await producer.send({
-        topic: type,
-        messages: [{ value: JSON.stringify(payload) }],
-      });
-    } finally {
-      await producer.disconnect();
-    }
-  }
-
-  async subscribe(type: string): Promise<void> {
-    if (!this.subscribedTopics.has(type)) {
-      this.subscribedTopics.add(type);
-      await this.restartConsumer();
-    }
-  }
-
-  async unsubscribe(type: string): Promise<void> {
-    this.subscribedTopics.delete(type);
-    if (this.subscribedTopics.size > 0) {
-      await this.restartConsumer();
-    } else if (this.consumer) {
-      await this.consumer.stop();
-      await this.consumer.disconnect();
-      this.consumer = null;
-      this.isRunning = false;
-    }
-  }
-
-  onMessage(handler: (type: string, payload: object) => void): void {
-    this.messageHandler = handler;
-  }
-
-  private async restartConsumer(): Promise<void> {
-    if (this.subscribedTopics.size === 0) return;
-
-    if (this.consumer && this.isRunning) {
-      console.log("Stopping existing Kafka consumer...");
-      await this.consumer.stop();
-      await this.consumer.disconnect();
-      this.isRunning = false;
-    }
-
-    console.log(
-      `Starting Kafka consumer with topics: ${Array.from(
-        this.subscribedTopics
-      ).join(", ")}`
-    );
     this.consumer = this.kafka.consumer({ groupId: this.options.groupId });
-    await this.consumer.connect();
 
+    await this.consumer.connect();
     await this.consumer.subscribe({
-      topics: Array.from(this.subscribedTopics),
+      topics: [/^(?!__).*$/],
       fromBeginning: false,
     });
-
     await this.consumer.run({
-      partitionsConsumedConcurrently: 1,
+      partitionsConsumedConcurrently: 48,
       eachMessage: async ({ topic, message }) => {
+        if (topic.startsWith("__")) {
+          return;
+        }
+
         if (this.messageHandler) {
           try {
             const payload = JSON.parse(message.value?.toString() || "{}");
@@ -115,19 +51,55 @@ export class KafkaAdapter implements EventAdapter {
         }
       },
     });
-
-    this.isRunning = true;
+    console.log(`Kafka consumer connected`);
   }
 
-  async getBacklog(): Promise<Map<string, number>> {
+  async disconnect(): Promise<void> {
+    if (this.consumer) {
+      await this.consumer.stop();
+      await this.consumer.disconnect();
+      this.consumer = null;
+    }
+    if (this.producer) {
+      await this.producer.disconnect();
+      this.producer = null;
+    }
+  }
+
+  async publish<T = object>(type: string, payload: T): Promise<void> {
+    if (!this.producer) {
+      throw new Error("Producer not connected");
+    }
+    await this.producer.send({
+      topic: type,
+      messages: [{ value: JSON.stringify(payload) }],
+    });
+  }
+
+  async subscribe(type: string): Promise<void> {
+    // No-op: EventManager handles callback registration in memory
+  }
+
+  async unsubscribe(type: string): Promise<void> {
+    // No-op: EventManager handles callback removal in memory
+  }
+
+  onMessage(handler: (type: string, payload: object) => void): void {
+    this.messageHandler = handler;
+  }
+
+  async getBacklog(topics: string[]): Promise<Map<string, number>> {
     const backlogMap = new Map<string, number>();
-    if (this.subscribedTopics.size === 0) return backlogMap;
+
+    if (topics.length === 0) {
+      return backlogMap;
+    }
 
     const admin = this.kafka.admin();
     await admin.connect();
 
     try {
-      for (const topic of this.subscribedTopics) {
+      for (const topic of topics) {
         const offsetsResponse = await admin.fetchOffsets({
           groupId: this.options.groupId,
           topics: [topic],
@@ -136,11 +108,11 @@ export class KafkaAdapter implements EventAdapter {
         const topicOffsets = await admin.fetchTopicOffsets(topic);
         let totalLag = 0;
 
-        const topicResponse = offsetsResponse.find(r => r.topic === topic);
+        const topicResponse = offsetsResponse.find((r) => r.topic === topic);
         if (topicResponse) {
           topicResponse.partitions.forEach((partitionOffset) => {
             const latestOffset = topicOffsets.find(
-              to => to.partition === partitionOffset.partition
+              (to) => to.partition === partitionOffset.partition
             );
 
             if (latestOffset) {
@@ -160,4 +132,3 @@ export class KafkaAdapter implements EventAdapter {
     return backlogMap;
   }
 }
-
