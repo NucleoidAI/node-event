@@ -1,7 +1,7 @@
 import * as client from "prom-client";
 import { Callback, InitOptions } from "./types/types";
+import { EventMetrics, PushgatewayConfig } from "./metrics";
 import { EventManager } from "./eventManager";
-import { EventMetrics } from "./metrics";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
 export declare const event: {
@@ -13,7 +13,12 @@ export declare const event: {
     startBacklogMonitoring: () => void;
     stopBacklogMonitoring: () => void;
     restartKafkaConsumer: () => Promise<void>;
+    startPushgateway: (config?: PushgatewayConfig) => void;
+    stopPushgateway: () => void;
+    pushMetricsToGateway: () => Promise<void>;
+    getPushgatewayConfig: () => PushgatewayConfig | undefined;
 };
 export { client };
 export { EventManager, EventMetrics, SocketAdapter, KafkaAdapter };
+export type { PushgatewayConfig };
 export * from "./types/types";

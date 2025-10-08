@@ -1,4 +1,12 @@
+export interface PushgatewayConfig {
+    url?: string;
+    jobName?: string;
+    instance?: string;
+    interval?: number;
+}
 export declare class EventMetrics {
+    private pushgatewayInterval?;
+    private pushgatewayConfig?;
     private readonly publishCounter;
     private readonly subscriptionGauge;
     private readonly publishDuration;
@@ -12,4 +20,8 @@ export declare class EventMetrics {
     recordCallback(type: string): () => void;
     updateSubscriptions(type: string, count: number): void;
     updateKafkaBacklog(topic: string, size: number): void;
+    startPushgateway(config?: PushgatewayConfig): void;
+    stopPushgateway(): void;
+    pushMetricsToGateway(): Promise<void>;
+    getPushgatewayConfig(): PushgatewayConfig | undefined;
 }

@@ -20,7 +20,6 @@ export class KafkaAdapter implements EventAdapter {
       clientId: options.clientId,
       brokers: options.brokers,
     });
-    this.topics = options.topics;
   }
 
   async connect(): Promise<void> {

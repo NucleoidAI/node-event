@@ -39,10 +39,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.KafkaAdapter = exports.SocketAdapter = exports.EventMetrics = exports.EventManager = exports.client = exports.event = void 0;
 const client = __importStar(require("prom-client"));
 exports.client = client;
-const eventManager_1 = require("./eventManager");
-Object.defineProperty(exports, "EventManager", { enumerable: true, get: function () { return eventManager_1.EventManager; } });
 const metrics_1 = require("./metrics");
 Object.defineProperty(exports, "EventMetrics", { enumerable: true, get: function () { return metrics_1.EventMetrics; } });
+const eventManager_1 = require("./eventManager");
+Object.defineProperty(exports, "EventManager", { enumerable: true, get: function () { return eventManager_1.EventManager; } });
 const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
 Object.defineProperty(exports, "KafkaAdapter", { enumerable: true, get: function () { return KafkaAdapter_1.KafkaAdapter; } });
 const SocketAdapter_1 = require("./adapters/SocketAdapter");
@@ -63,5 +63,9 @@ exports.event = {
     restartKafkaConsumer: async () => {
         console.log("Consumer restart is handled automatically");
     },
+    startPushgateway: (config) => manager.startPushgateway(config),
+    stopPushgateway: () => manager.stopPushgateway(),
+    pushMetricsToGateway: () => manager.pushMetricsToGateway(),
+    getPushgatewayConfig: () => manager.getPushgatewayConfig(),
 };
 __exportStar(require("./types/types"), exports);

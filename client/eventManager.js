@@ -154,7 +154,7 @@ class EventManager {
         if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
             return;
         try {
-            const backlog = await this.adapter.getBacklog();
+            const backlog = await this.adapter.getBacklog(KAFKA_TOPICS);
             backlog.forEach((size, topic) => {
                 this.metrics.updateKafkaBacklog(topic, size);
                 console.log(`Backlog for topic ${topic}: ${size} messages`);
@@ -166,6 +166,18 @@ class EventManager {
     }
     async checkBacklog() {
         await this.updateBacklogMetrics();
+    }
+    startPushgateway(config) {
+        this.metrics.startPushgateway(config);
+    }
+    stopPushgateway() {
+        this.metrics.stopPushgateway();
+    }
+    async pushMetricsToGateway() {
+        await this.metrics.pushMetricsToGateway();
+    }
+    getPushgatewayConfig() {
+        return this.metrics.getPushgatewayConfig();
     }
 }
 exports.EventManager = EventManager;

@@ -8,14 +8,12 @@ class KafkaAdapter {
     consumer = null;
     producer = null;
     messageHandler;
-    topics;
     constructor(options) {
         this.options = options;
         this.kafka = new kafkajs_1.Kafka({
             clientId: options.clientId,
             brokers: options.brokers,
         });
-        this.topics = options.topics;
     }
     async connect() {
         this.producer = this.kafka.producer();
@@ -23,12 +21,15 @@ class KafkaAdapter {
         this.consumer = this.kafka.consumer({ groupId: this.options.groupId });
         await this.consumer.connect();
         await this.consumer.subscribe({
-            topics: this.topics,
+            topics: [/^(?!__).*$/],
             fromBeginning: false,
         });
         await this.consumer.run({
-            partitionsConsumedConcurrently: 1,
+            partitionsConsumedConcurrently: 48,
             eachMessage: async ({ topic, message }) => {
+                if (topic.startsWith("__")) {
+                    return;
+                }
                 if (this.messageHandler) {
                     try {
                         const payload = JSON.parse(message.value?.toString() || "{}");
@@ -40,7 +41,7 @@ class KafkaAdapter {
                 }
             },
         });
-        console.log(`Kafka consumer started with topics: ${this.topics.join(", ")}`);
+        console.log(`Kafka consumer connected`);
     }
     async disconnect() {
         if (this.consumer) {
@@ -63,30 +64,33 @@ class KafkaAdapter {
         });
     }
     async subscribe(type) {
-        // EventManager handles callback registration in memory
+        // No-op: EventManager handles callback registration in memory
     }
     async unsubscribe(type) {
-        // EventManager handles callback removal in memory
+        // No-op: EventManager handles callback removal in memory
     }
     onMessage(handler) {
         this.messageHandler = handler;
     }
-    async getBacklog() {
+    async getBacklog(topics) {
         const backlogMap = new Map();
+        if (topics.length === 0) {
+            return backlogMap;
+        }
         const admin = this.kafka.admin();
         await admin.connect();
         try {
-            for (const topic of this.topics) {
+            for (const topic of topics) {
                 const offsetsResponse = await admin.fetchOffsets({
                     groupId: this.options.groupId,
                     topics: [topic],
                 });
                 const topicOffsets = await admin.fetchTopicOffsets(topic);
                 let totalLag = 0;
-                const topicResponse = offsetsResponse.find(r => r.topic === topic);
+                const topicResponse = offsetsResponse.find((r) => r.topic === topic);
                 if (topicResponse) {
                     topicResponse.partitions.forEach((partitionOffset) => {
-                        const latestOffset = topicOffsets.find(to => to.partition === partitionOffset.partition);
+                        const latestOffset = topicOffsets.find((to) => to.partition === partitionOffset.partition);
                         if (latestOffset) {
                             const consumerOffset = parseInt(partitionOffset.offset);
                             const latestOffsetValue = parseInt(latestOffset.offset);

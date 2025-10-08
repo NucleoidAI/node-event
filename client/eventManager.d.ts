@@ -1,4 +1,5 @@
 import { Callback, InitOptions } from "./types/types";
+import { PushgatewayConfig } from "./metrics";
 export declare class EventManager {
     private adapter;
     private callbacks;
@@ -15,4 +16,8 @@ export declare class EventManager {
     private stopBacklogMonitoring;
     private updateBacklogMetrics;
     checkBacklog(): Promise<void>;
+    startPushgateway(config?: PushgatewayConfig): void;
+    stopPushgateway(): void;
+    pushMetricsToGateway(): Promise<void>;
+    getPushgatewayConfig(): PushgatewayConfig | undefined;
 }

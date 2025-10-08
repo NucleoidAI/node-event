@@ -5,7 +5,6 @@ export declare class KafkaAdapter implements EventAdapter {
     private consumer;
     private producer;
     private messageHandler?;
-    private readonly topics;
     constructor(options: {
         clientId: string;
         brokers: string[];
@@ -18,5 +17,5 @@ export declare class KafkaAdapter implements EventAdapter {
     subscribe(type: string): Promise<void>;
     unsubscribe(type: string): Promise<void>;
     onMessage(handler: (type: string, payload: object) => void): void;
-    getBacklog(): Promise<Map<string, number>>;
+    getBacklog(topics: string[]): Promise<Map<string, number>>;
 }
