@@ -1,11 +1,10 @@
 import * as oracledb from "oracledb";
 
 import { EventAdapter } from "../types/types";
-import { EventMessage } from "../models/EventMessage";
 
 export class TxEventQAdapter implements EventAdapter {
   private connection: oracledb.Connection | null = null;
-  private queue: oracledb.AdvancedQueue<EventMessage> | null = null;
+  private queue: oracledb.AdvancedQueue<any> | null = null;
   private messageHandler?: (type: string, payload: object) => void;
   private isRunning: boolean = false;
   private subscriptionLoop: Promise<void> | null = null;
@@ -45,12 +44,9 @@ export class TxEventQAdapter implements EventAdapter {
         password: this.options.password,
       });
 
-      this.queue = await this.connection.getQueue<EventMessage>(
-        this.options.queueName,
-        {
-          payloadType: oracledb.DB_TYPE_JSON,
-        } as any
-      );
+      this.queue = await this.connection.getQueue(this.options.queueName, {
+        payloadType: oracledb.DB_TYPE_JSON,
+      } as any);
 
       const batchSize = this.options.batchSize || 1;
       const waitTime = this.options.waitTime || 1000;
@@ -97,16 +93,14 @@ export class TxEventQAdapter implements EventAdapter {
     }
 
     try {
-      const message: EventMessage = {
-        eventType: type,
+      const message = {
+        topic: type,
         payload: payload,
-        timestamp: new Date().toISOString(),
-        userId: (payload as any).userId,
       };
 
       await this.queue.enqOne({
         payload: message,
-        correlation: message.userId?.toString() || "unknown",
+        correlation: type,
         priority: 0,
         delay: 0,
         expiration: -1,
@@ -142,7 +136,7 @@ export class TxEventQAdapter implements EventAdapter {
     try {
       while (this.isRunning) {
         try {
-          let messages: oracledb.AdvancedQueueMessage<EventMessage>[] = [];
+          let messages: oracledb.AdvancedQueueMessage<any>[] = [];
 
           const batchSize = this.options.batchSize || 1;
 
@@ -160,14 +154,14 @@ export class TxEventQAdapter implements EventAdapter {
 
           if (messages && messages.length > 0) {
             for (const message of messages) {
-              const eventData: EventMessage = message.payload as any;
+              const messageData = message.payload as any;
 
-              if (this.messageHandler) {
+              if (this.messageHandler && messageData.topic) {
                 try {
-                  this.messageHandler(eventData.eventType, eventData.payload);
+                  this.messageHandler(messageData.topic, messageData.payload);
                 } catch (error) {
                   console.error(
-                    `Error processing message for type ${eventData.eventType}:`,
+                    `Error processing message for topic ${messageData.topic}:`,
                     error
                   );
                 }
