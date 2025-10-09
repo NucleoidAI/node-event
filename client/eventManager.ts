@@ -3,6 +3,7 @@ import { EventMetrics, PushgatewayConfig } from "./metrics";
 
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
+import { TxEventQAdapter } from "./adapters/TxEventQAdapter";
 
 const KAFKA_TOPICS = [
   "KNOWLEDGE_CREATED",
@@ -48,11 +49,25 @@ export class EventManager {
         });
         this.startBacklogMonitoring();
         break;
+
+      case "txeventq":
+        this.adapter = new TxEventQAdapter({
+          connectString: options.connectString,
+          user: options.user,
+          password: options.password,
+          queueName: options.queueName,
+          instantClientPath: options.instantClientPath,
+          consumerName: options.consumerName,
+          batchSize: options.batchSize,
+          waitTime: options.waitTime,
+        });
+        break;
+
       default:
         throw new Error(`Unknown adapter type`);
     }
     await this.adapter.connect();
-    
+
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });

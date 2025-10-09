@@ -6,6 +6,7 @@ import { EventMetrics, PushgatewayConfig } from "./metrics";
 import { EventManager } from "./eventManager";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
+import { TxEventQAdapter } from "./adapters/TxEventQAdapter";
 
 const manager = new EventManager();
 
@@ -37,6 +38,14 @@ export const event = {
 
 export { client };
 
-export { EventManager, EventMetrics, SocketAdapter, KafkaAdapter };
+export {
+  EventManager,
+  EventMetrics,
+  SocketAdapter,
+  KafkaAdapter,
+  TxEventQAdapter,
+};
 export type { PushgatewayConfig };
 export * from "./types/types";
+export * from "./models/EventMessage";
+export * from "./models/EventGenerator";

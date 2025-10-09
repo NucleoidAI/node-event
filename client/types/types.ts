@@ -10,7 +10,7 @@ export interface EventAdapter {
 }
 
 export interface BaseInitOptions {
-  type: "inMemory" | "kafka";
+  type: "inMemory" | "kafka" | "txeventq";
 }
 
 export interface InMemoryOptions extends BaseInitOptions {
@@ -27,4 +27,16 @@ export interface KafkaOptions extends BaseInitOptions {
   groupId: string;
 }
 
-export type InitOptions = InMemoryOptions | KafkaOptions;
+export interface TxEventQOptions extends BaseInitOptions {
+  type: "txeventq";
+  connectString: string;
+  user: string;
+  password: string;
+  queueName: string;
+  instantClientPath?: string;
+  consumerName?: string;
+  batchSize?: number;
+  waitTime?: number;
+}
+
+export type InitOptions = InMemoryOptions | KafkaOptions | TxEventQOptions;
