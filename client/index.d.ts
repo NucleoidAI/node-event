@@ -4,6 +4,7 @@ import { EventMetrics, PushgatewayConfig } from "./metrics";
 import { EventManager } from "./eventManager";
 import { KafkaAdapter } from "./adapters/KafkaAdapter";
 import { SocketAdapter } from "./adapters/SocketAdapter";
+import { TxEventQAdapter } from "./adapters/TxEventQAdapter";
 export declare const event: {
     init: (options: InitOptions) => Promise<void>;
     publish: <T extends object = object>(...args: [...string[], T]) => Promise<void>;
@@ -19,6 +20,6 @@ export declare const event: {
     getPushgatewayConfig: () => PushgatewayConfig | undefined;
 };
 export { client };
-export { EventManager, EventMetrics, SocketAdapter, KafkaAdapter };
+export { EventManager, EventMetrics, SocketAdapter, KafkaAdapter, TxEventQAdapter, };
 export type { PushgatewayConfig };
 export * from "./types/types";

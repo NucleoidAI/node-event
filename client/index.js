@@ -36,7 +36,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.KafkaAdapter = exports.SocketAdapter = exports.EventMetrics = exports.EventManager = exports.client = exports.event = void 0;
+exports.TxEventQAdapter = exports.KafkaAdapter = exports.SocketAdapter = exports.EventMetrics = exports.EventManager = exports.client = exports.event = void 0;
 const client = __importStar(require("prom-client"));
 exports.client = client;
 const metrics_1 = require("./metrics");
@@ -47,6 +47,8 @@ const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
 Object.defineProperty(exports, "KafkaAdapter", { enumerable: true, get: function () { return KafkaAdapter_1.KafkaAdapter; } });
 const SocketAdapter_1 = require("./adapters/SocketAdapter");
 Object.defineProperty(exports, "SocketAdapter", { enumerable: true, get: function () { return SocketAdapter_1.SocketAdapter; } });
+const TxEventQAdapter_1 = require("./adapters/TxEventQAdapter");
+Object.defineProperty(exports, "TxEventQAdapter", { enumerable: true, get: function () { return TxEventQAdapter_1.TxEventQAdapter; } });
 const manager = new eventManager_1.EventManager();
 exports.event = {
     init: (options) => manager.init(options),

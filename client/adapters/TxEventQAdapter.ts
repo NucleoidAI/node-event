@@ -56,6 +56,8 @@ export class TxEventQAdapter implements EventAdapter {
 
       if (this.options.consumerName) {
         this.queue.deqOptions.consumerName = this.options.consumerName;
+      }else {
+        this.queue.deqOptions.consumerName = "event_subscriber";
       }
 
       this.isRunning = true;

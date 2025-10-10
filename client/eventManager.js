@@ -4,6 +4,7 @@ exports.EventManager = void 0;
 const metrics_1 = require("./metrics");
 const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
 const SocketAdapter_1 = require("./adapters/SocketAdapter");
+const TxEventQAdapter_1 = require("./adapters/TxEventQAdapter");
 const KAFKA_TOPICS = [
     "KNOWLEDGE_CREATED",
     "MESSAGE_USER_MESSAGED",
@@ -47,6 +48,18 @@ class EventManager {
                     topics: KAFKA_TOPICS,
                 });
                 this.startBacklogMonitoring();
+                break;
+            case "txeventq":
+                this.adapter = new TxEventQAdapter_1.TxEventQAdapter({
+                    connectString: options.connectString,
+                    user: options.user,
+                    password: options.password,
+                    queueName: options.queueName,
+                    instantClientPath: options.instantClientPath,
+                    consumerName: options.consumerName,
+                    batchSize: options.batchSize,
+                    waitTime: options.waitTime,
+                });
                 break;
             default:
                 throw new Error(`Unknown adapter type`);

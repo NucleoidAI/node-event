@@ -25,7 +25,7 @@ class KafkaAdapter {
             fromBeginning: false,
         });
         await this.consumer.run({
-            partitionsConsumedConcurrently: 48,
+            partitionsConsumedConcurrently: 160,
             eachMessage: async ({ topic, message }) => {
                 if (topic.startsWith("__")) {
                     return;

@@ -47,5 +47,4 @@ export {
 };
 export type { PushgatewayConfig };
 export * from "./types/types";
-export * from "./models/EventMessage";
-export * from "./models/EventGenerator";
+
