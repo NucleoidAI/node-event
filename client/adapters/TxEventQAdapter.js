@@ -124,29 +124,27 @@ class TxEventQAdapter {
         this.queue = await this.connection.getQueue(queueName, {
             payloadType: oracledb.DB_TYPE_JSON,
         });
-        this.queue.deqOptions.wait =
-            this.options.batchSize > 1
-                ? oracledb.AQ_DEQ_NO_WAIT
-                : this.options.waitTime || 1000;
+        this.queue.deqOptions.wait = 5000;
         this.queue.deqOptions.consumerName =
             this.options.consumerName || `${type.toLowerCase()}_subscriber`;
         try {
             while (this.isRunning) {
                 let messages = [];
-                if (this.options.batchSize === 1) {
-                    console.log("Using deqOne()");
-                    const message = await this.queue.deqOne();
-                    if (message) {
-                        messages = [message];
-                    }
-                }
-                else {
-                    const dequeuedMessages = await this.queue.deqMany(this.options.batchSize);
-                    if (dequeuedMessages) {
-                        messages = dequeuedMessages;
-                    }
+                const message = await this.queue.deqOne();
+                if (message) {
+                    messages = [message];
                 }
                 if (messages && messages.length > 0) {
+                    if (this.messageHandler) {
+                        try {
+                            const payload = message.payload.payload || {};
+                            console.log("test-payload", payload);
+                            this.messageHandler(type, payload);
+                        }
+                        catch (error) {
+                            console.error(`Error processing message for topic ${type}:`, error);
+                        }
+                    }
                     if (this.options.autoCommit) {
                         await this.connection.commit();
                         console.log(`Transaction committed for ${messages.length} message(s)`);
@@ -155,7 +153,7 @@ class TxEventQAdapter {
             }
         }
         catch (error) {
-            console.error("Fatal error during consumption:", error.message);
+            console.error("Fatal error during consumption:", error);
             throw error;
         }
     }

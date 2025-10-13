@@ -15,7 +15,7 @@ export class TxEventQAdapter implements EventAdapter {
       password: string;
       instantClientPath?: string;
       consumerName?: string;
-      batchSize?: number
+      batchSize?: number;
       waitTime?: number;
       autoCommit?: boolean;
     }
@@ -73,13 +73,11 @@ export class TxEventQAdapter implements EventAdapter {
     }
 
     try {
-
       const queueName = `TXEVENTQ_USER.${type}`;
 
       this.queue = await this.connection.getQueue(queueName, {
         payloadType: oracledb.DB_TYPE_JSON,
       } as any);
-
 
       const message = {
         topic: type,
@@ -106,52 +104,48 @@ export class TxEventQAdapter implements EventAdapter {
     if (!this.connection) {
       throw new Error("Subscriber not initialized");
     }
-
     this.isRunning = true;
-    const queueName = `TXEVENTQ_USER.${type}`;
 
+    const queueName = `TXEVENTQ_USER.${type}`;
+    
     this.queue = await this.connection.getQueue(queueName, {
       payloadType: oracledb.DB_TYPE_JSON,
-    } as any);
-
-    this.queue.deqOptions.wait =
-    this.options.batchSize! > 1
-      ? oracledb.AQ_DEQ_NO_WAIT
-      : this.options.waitTime || 1000;
-
+    });
+    
+    this.queue.deqOptions.wait = 5000;
     this.queue.deqOptions.consumerName =
-    this.options.consumerName || `${type.toLowerCase()}_subscriber`;
-
+      this.options.consumerName || `${type.toLowerCase()}_subscriber`;
     try {
       while (this.isRunning) {
         let messages: oracledb.AdvancedQueueMessage[] = [];
-
-        if (this.options.batchSize === 1) {
-          const message = await this.queue.deqOne();
-          if (message) {
-            messages = [message];
-          }
-        } else {
-          const dequeuedMessages = await this.queue.deqMany(
-            this.options.batchSize!
-          );
-          if (dequeuedMessages) {
-            messages = dequeuedMessages;
-          }
+        
+        const message = await this.queue.deqOne();
+        if (message) {
+          messages = [message];
         }
-
         if (messages && messages.length > 0) {
-
+          if (this.messageHandler) {
+            try {
+              const payload = message.payload.payload || {};
+              console.log("test-payload", payload);
+              this.messageHandler(type, payload);
+            } catch (error) {
+              console.error(
+                `Error processing message for topic ${type}:`,
+                error
+              );
+            }
+          }
           if (this.options.autoCommit) {
-            await this.connection!.commit();
+            await this.connection.commit();
             console.log(
               `Transaction committed for ${messages.length} message(s)`
             );
           }
         }
       }
-    } catch (error: any) {
-      console.error("Fatal error during consumption:", error.message);
+    } catch (error) {
+      console.error("Fatal error during consumption:", error);
       throw error;
     }
   }
@@ -178,3 +172,4 @@ export class TxEventQAdapter implements EventAdapter {
     return backlogMap;
   }
 }
+
