@@ -55,7 +55,6 @@ export class EventManager {
           connectString: options.connectString,
           user: options.user,
           password: options.password,
-          queueName: options.queueName,
           instantClientPath: options.instantClientPath,
           consumerName: options.consumerName,
           batchSize: options.batchSize,

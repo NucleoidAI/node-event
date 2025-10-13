@@ -27,7 +27,6 @@ export interface TxEventQOptions extends BaseInitOptions {
     connectString: string;
     user: string;
     password: string;
-    queueName: string;
     instantClientPath?: string;
     consumerName?: string;
     batchSize?: number;

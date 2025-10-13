@@ -7,18 +7,17 @@ export class TxEventQAdapter implements EventAdapter {
   private queue: oracledb.AdvancedQueue<any> | null = null;
   private messageHandler?: (type: string, payload: object) => void;
   private isRunning: boolean = false;
-  private subscriptionLoop: Promise<void> | null = null;
 
   constructor(
     private readonly options: {
       connectString: string;
       user: string;
       password: string;
-      queueName: string;
       instantClientPath?: string;
       consumerName?: string;
-      batchSize?: number;
+      batchSize?: number
       waitTime?: number;
+      autoCommit?: boolean;
     }
   ) {}
 
@@ -44,24 +43,7 @@ export class TxEventQAdapter implements EventAdapter {
         password: this.options.password,
       });
 
-      this.queue = await this.connection.getQueue(this.options.queueName, {
-        payloadType: oracledb.DB_TYPE_JSON,
-      } as any);
-
-      const batchSize = this.options.batchSize || 1;
-      const waitTime = this.options.waitTime || 1000;
-
-      this.queue.deqOptions.wait =
-        batchSize > 1 ? oracledb.AQ_DEQ_NO_WAIT : waitTime;
-
-      if (this.options.consumerName) {
-        this.queue.deqOptions.consumerName = this.options.consumerName;
-      }else {
-        this.queue.deqOptions.consumerName = "event_subscriber";
-      }
-
       this.isRunning = true;
-      this.subscriptionLoop = this.startConsumption();
 
       console.log("TxEventQ adapter connected successfully");
     } catch (error: any) {
@@ -72,10 +54,6 @@ export class TxEventQAdapter implements EventAdapter {
 
   async disconnect(): Promise<void> {
     this.isRunning = false;
-    if (this.subscriptionLoop) {
-      await this.subscriptionLoop;
-      this.subscriptionLoop = null;
-    }
 
     if (this.connection) {
       try {
@@ -90,11 +68,19 @@ export class TxEventQAdapter implements EventAdapter {
   }
 
   async publish<T = object>(type: string, payload: T): Promise<void> {
-    if (!this.connection || !this.queue) {
+    if (!this.connection) {
       throw new Error("TxEventQAdapter not connected");
     }
 
     try {
+
+      const queueName = `TXEVENTQ_USER.${type}`;
+
+      this.queue = await this.connection.getQueue(queueName, {
+        payloadType: oracledb.DB_TYPE_JSON,
+      } as any);
+
+
       const message = {
         topic: type,
         payload: payload,
@@ -117,78 +103,69 @@ export class TxEventQAdapter implements EventAdapter {
   }
 
   async subscribe(type: string): Promise<void> {
-    // No-op: EventManager handles callback registration in memory
+    if (!this.connection) {
+      throw new Error("Subscriber not initialized");
+    }
+
+    this.isRunning = true;
+    const queueName = `TXEVENTQ_USER.${type}`;
+
+    this.queue = await this.connection.getQueue(queueName, {
+      payloadType: oracledb.DB_TYPE_JSON,
+    } as any);
+
+    this.queue.deqOptions.wait =
+    this.options.batchSize! > 1
+      ? oracledb.AQ_DEQ_NO_WAIT
+      : this.options.waitTime || 1000;
+
+    this.queue.deqOptions.consumerName =
+    this.options.consumerName || `${type.toLowerCase()}_subscriber`;
+
+    try {
+      while (this.isRunning) {
+        let messages: oracledb.AdvancedQueueMessage[] = [];
+
+        if (this.options.batchSize === 1) {
+          const message = await this.queue.deqOne();
+          if (message) {
+            messages = [message];
+          }
+        } else {
+          const dequeuedMessages = await this.queue.deqMany(
+            this.options.batchSize!
+          );
+          if (dequeuedMessages) {
+            messages = dequeuedMessages;
+          }
+        }
+
+        if (messages && messages.length > 0) {
+
+          if (this.options.autoCommit) {
+            await this.connection!.commit();
+            console.log(
+              `Transaction committed for ${messages.length} message(s)`
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Fatal error during consumption:", error.message);
+      throw error;
+    }
   }
 
   async unsubscribe(type: string): Promise<void> {
-    // No-op: EventManager handles callback removal in memory
+    if (!this.connection) {
+      throw new Error("Subscriber not initialized");
+    }
+    this.isRunning = false;
+    this.queue = null;
   }
 
   onMessage(handler: (type: string, payload: object) => void): void {
     this.messageHandler = handler;
-  }
-
-  private async startConsumption(): Promise<void> {
-    if (!this.connection || !this.queue) {
-      throw new Error("TxEventQAdapter not initialized");
-    }
-
-    console.log("Starting TxEventQ message consumption...");
-
-    try {
-      while (this.isRunning) {
-        try {
-          let messages: oracledb.AdvancedQueueMessage<any>[] = [];
-
-          const batchSize = this.options.batchSize || 1;
-
-          if (batchSize === 1) {
-            const message = await this.queue!.deqOne();
-            if (message) {
-              messages = [message];
-            }
-          } else {
-            const dequeuedMessages = await this.queue!.deqMany(batchSize);
-            if (dequeuedMessages) {
-              messages = dequeuedMessages;
-            }
-          }
-
-          if (messages && messages.length > 0) {
-            for (const message of messages) {
-              const messageData = message.payload as any;
-
-              if (this.messageHandler && messageData.topic) {
-                try {
-                  this.messageHandler(messageData.topic, messageData.payload);
-                } catch (error) {
-                  console.error(
-                    `Error processing message for topic ${messageData.topic}:`,
-                    error
-                  );
-                }
-              }
-            }
-
-            await this.connection!.commit();
-          }
-        } catch (error: any) {
-          if (error.code === 25228) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            continue;
-          }
-
-          console.error("Error during TxEventQ consumption:", error.message);
-
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-    } catch (error: any) {
-      console.error("Fatal error during TxEventQ consumption:", error.message);
-      throw error;
-    }
-
-    console.log("TxEventQ message consumption stopped");
   }
 
   async getBacklog(topics: string[]): Promise<Map<string, number>> {
