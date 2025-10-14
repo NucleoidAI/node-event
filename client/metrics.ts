@@ -8,59 +8,81 @@ export interface PushgatewayConfig {
 }
 
 export class EventMetrics {
+  private readonly registry: client.Registry;
   private pushgatewayInterval?: NodeJS.Timeout;
   private pushgatewayConfig?: PushgatewayConfig;
 
-  private readonly publishCounter = new client.Counter({
-    name: "events_published_total",
-    help: "Total number of events published",
-    labelNames: ["event_type"],
-  });
+  private readonly publishCounter: client.Counter<string>;
+  private readonly subscriptionGauge: client.Gauge<string>;
+  private readonly publishDuration: client.Histogram<string>;
+  private readonly payloadSize: client.Histogram<string>;
+  private readonly publishErrors: client.Counter<string>;
+  private readonly callbackDuration: client.Histogram<string>;
+  private readonly throughput: client.Counter<string>;
+  private readonly kafkaBacklog: client.Gauge<string>;
 
-  private readonly subscriptionGauge = new client.Gauge({
-    name: "active_event_subscriptions",
-    help: "Number of active event subscriptions",
-    labelNames: ["event_type"],
-  });
+  constructor() {
+    this.registry = new client.Registry();
 
-  private readonly publishDuration = new client.Histogram({
-    name: "event_publish_duration_seconds",
-    help: "Time taken to publish events",
-    labelNames: ["event_type"],
-    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
-  });
+    this.publishCounter = new client.Counter({
+      name: "events_published_total",
+      help: "Total number of events published",
+      labelNames: ["event_type"],
+      registers: [this.registry],
+    });
 
-  private readonly payloadSize = new client.Histogram({
-    name: "event_payload_size_bytes",
-    help: "Size of event payloads in bytes",
-    labelNames: ["event_type"],
-    buckets: [10, 100, 1000, 10000, 100000, 1000000],
-  });
+    this.subscriptionGauge = new client.Gauge({
+      name: "active_event_subscriptions",
+      help: "Number of active event subscriptions",
+      labelNames: ["event_type"],
+      registers: [this.registry],
+    });
 
-  private readonly publishErrors = new client.Counter({
-    name: "event_publish_errors_total",
-    help: "Total number of event publish errors",
-    labelNames: ["event_type", "error_type"],
-  });
+    this.publishDuration = new client.Histogram({
+      name: "event_publish_duration_seconds",
+      help: "Time taken to publish events",
+      labelNames: ["event_type"],
+      buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+      registers: [this.registry],
+    });
 
-  private readonly callbackDuration = new client.Histogram({
-    name: "event_callback_duration_seconds",
-    help: "Time taken to process event callbacks",
-    labelNames: ["event_type"],
-    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
-  });
+    this.payloadSize = new client.Histogram({
+      name: "event_payload_size_bytes",
+      help: "Size of event payloads in bytes",
+      labelNames: ["event_type"],
+      buckets: [10, 100, 1000, 10000, 100000, 1000000],
+      registers: [this.registry],
+    });
 
-  private readonly throughput = new client.Counter({
-    name: "event_callbacks_processed_total",
-    help: "Total number of event callbacks processed successfully",
-    labelNames: ["event_type"],
-  });
+    this.publishErrors = new client.Counter({
+      name: "event_publish_errors_total",
+      help: "Total number of event publish errors",
+      labelNames: ["event_type", "error_type"],
+      registers: [this.registry],
+    });
 
-  private readonly kafkaBacklog = new client.Gauge({
-    name: "kafka_backlog_events_total",
-    help: "Total number of events waiting to be processed",
-    labelNames: ["topic"],
-  });
+    this.callbackDuration = new client.Histogram({
+      name: "event_callback_duration_seconds",
+      help: "Time taken to process event callbacks",
+      labelNames: ["event_type"],
+      buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+      registers: [this.registry],
+    });
+
+    this.throughput = new client.Counter({
+      name: "event_callbacks_processed_total",
+      help: "Total number of event callbacks processed successfully",
+      labelNames: ["event_type"],
+      registers: [this.registry],
+    });
+
+    this.kafkaBacklog = new client.Gauge({
+      name: "kafka_backlog_events_total",
+      help: "Total number of events waiting to be processed",
+      labelNames: ["topic"],
+      registers: [this.registry],
+    });
+  }
 
   recordPublish(type: string, payloadSizeBytes: number): () => void {
     this.publishCounter.labels(type).inc();
@@ -120,7 +142,7 @@ export class EventMetrics {
     }
 
     try {
-      const body = await client.register.metrics();
+      const body = await this.registry.metrics(); 
       let url = `${this.pushgatewayConfig.url}/metrics/job/${this.pushgatewayConfig.jobName}`;
 
       if (this.pushgatewayConfig.instance) {
