@@ -138,7 +138,6 @@ class TxEventQAdapter {
                     if (this.messageHandler) {
                         try {
                             const payload = message.payload.payload || {};
-                            console.log("test-payload", payload);
                             this.messageHandler(type, payload);
                         }
                         catch (error) {

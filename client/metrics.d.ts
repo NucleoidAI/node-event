@@ -5,6 +5,7 @@ export interface PushgatewayConfig {
     interval?: number;
 }
 export declare class EventMetrics {
+    private readonly registry;
     private pushgatewayInterval?;
     private pushgatewayConfig?;
     private readonly publishCounter;
@@ -15,6 +16,7 @@ export declare class EventMetrics {
     private readonly callbackDuration;
     private readonly throughput;
     private readonly kafkaBacklog;
+    constructor();
     recordPublish(type: string, payloadSizeBytes: number): () => void;
     recordPublishError(type: string, errorType: string): void;
     recordCallback(type: string): () => void;
