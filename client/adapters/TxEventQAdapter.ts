@@ -5,6 +5,7 @@ import { EventAdapter } from "../types/types";
 export class TxEventQAdapter implements EventAdapter {
   private connection: oracledb.Connection | null = null;
   private queue: oracledb.AdvancedQueue<any> | null = null;
+  private queueCache: Map<string, oracledb.AdvancedQueue<any>> = new Map();
   private messageHandler?: (type: string, payload: object) => void;
   private isRunning: boolean = false;
 
@@ -14,6 +15,7 @@ export class TxEventQAdapter implements EventAdapter {
       user: string;
       password: string;
       instantClientPath?: string;
+      walletPath?: string;
       consumerName?: string;
       batchSize?: number;
       waitTime?: number;
@@ -27,6 +29,8 @@ export class TxEventQAdapter implements EventAdapter {
         try {
           oracledb.initOracleClient({
             libDir: this.options.instantClientPath,
+            configDir: this.options.walletPath,
+            walletPath: this.options.walletPath,
           });
           console.log("Oracle Thick client initialized");
         } catch (initError: any) {
@@ -41,6 +45,8 @@ export class TxEventQAdapter implements EventAdapter {
         connectString: this.options.connectString,
         user: this.options.user,
         password: this.options.password,
+        configDir: this.options.walletPath,
+        walletPath: this.options.walletPath,
       });
 
       this.isRunning = true;
@@ -57,6 +63,8 @@ export class TxEventQAdapter implements EventAdapter {
 
     if (this.connection) {
       try {
+        this.queueCache.clear();
+        
         await this.connection.close();
         console.log("TxEventQ connection closed");
       } catch (error) {
@@ -67,15 +75,35 @@ export class TxEventQAdapter implements EventAdapter {
     }
   }
 
+  private async getOrCreateQueue(
+    queueName: string,
+    options: any
+  ): Promise<oracledb.AdvancedQueue<any>> {
+    if (!this.connection) {
+      throw new Error("TxEventQAdapter not connected");
+    }
+
+    if (this.queueCache.has(queueName)) {
+      return this.queueCache.get(queueName)!;
+    }
+
+    const queue = await this.connection.getQueue(queueName, options);
+    this.queueCache.set(queueName, queue);
+    
+    console.log(`Queue ${queueName} cached`);
+    
+    return queue;
+  }
+
   async publish<T = object>(type: string, payload: T): Promise<void> {
     if (!this.connection) {
       throw new Error("TxEventQAdapter not connected");
     }
 
     try {
-      const queueName = `TXEVENTQ_USER.${type}`;
+      const queueName = type;
 
-      this.queue = await this.connection.getQueue(queueName, {
+      this.queue = await this.getOrCreateQueue(queueName, {
         payloadType: oracledb.DB_TYPE_JSON,
       } as any);
 
@@ -108,7 +136,7 @@ export class TxEventQAdapter implements EventAdapter {
 
     const queueName = `TXEVENTQ_USER.${type}`;
     
-    this.queue = await this.connection.getQueue(queueName, {
+    this.queue = await this.getOrCreateQueue(queueName, {
       payloadType: oracledb.DB_TYPE_JSON,
     });
     
@@ -171,4 +199,3 @@ export class TxEventQAdapter implements EventAdapter {
     return backlogMap;
   }
 }
-

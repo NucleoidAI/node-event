@@ -3,6 +3,7 @@ export declare class TxEventQAdapter implements EventAdapter {
     private readonly options;
     private connection;
     private queue;
+    private queueCache;
     private messageHandler?;
     private isRunning;
     constructor(options: {
@@ -10,6 +11,7 @@ export declare class TxEventQAdapter implements EventAdapter {
         user: string;
         password: string;
         instantClientPath?: string;
+        walletPath?: string;
         consumerName?: string;
         batchSize?: number;
         waitTime?: number;
@@ -17,6 +19,7 @@ export declare class TxEventQAdapter implements EventAdapter {
     });
     connect(): Promise<void>;
     disconnect(): Promise<void>;
+    private getOrCreateQueue;
     publish<T = object>(type: string, payload: T): Promise<void>;
     subscribe(type: string): Promise<void>;
     unsubscribe(type: string): Promise<void>;

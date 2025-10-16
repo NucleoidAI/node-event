@@ -28,8 +28,10 @@ export interface TxEventQOptions extends BaseInitOptions {
     user: string;
     password: string;
     instantClientPath?: string;
+    walletPath?: string;
     consumerName?: string;
     batchSize?: number;
     waitTime?: number;
+    topics?: string[];
 }
 export type InitOptions = InMemoryOptions | KafkaOptions | TxEventQOptions;

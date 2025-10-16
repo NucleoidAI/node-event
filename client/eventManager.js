@@ -5,7 +5,7 @@ const metrics_1 = require("./metrics");
 const KafkaAdapter_1 = require("./adapters/KafkaAdapter");
 const SocketAdapter_1 = require("./adapters/SocketAdapter");
 const TxEventQAdapter_1 = require("./adapters/TxEventQAdapter");
-const KAFKA_TOPICS = [
+const TOPICS = [
     "KNOWLEDGE_CREATED",
     "MESSAGE_USER_MESSAGED",
     "SESSION_USER_MESSAGED",
@@ -14,6 +14,8 @@ const KAFKA_TOPICS = [
     "STEP_COMPLETED",
     "MESSAGE_USER_MESSAGED",
     "MESSAGE_ASSISTANT_MESSAGED",
+    "RESPONSIBILITY_CREATED",
+    "RESPONSIBILITY_DESCRIPTION_GENERATED",
     "SESSION_INITIATED",
     "SESSION_USER_MESSAGED",
     "SESSION_AI_MESSAGED",
@@ -45,7 +47,7 @@ class EventManager {
                     clientId: options.clientId,
                     brokers: options.brokers,
                     groupId: options.groupId,
-                    topics: KAFKA_TOPICS,
+                    topics: TOPICS,
                 });
                 this.startBacklogMonitoring();
                 break;
@@ -55,6 +57,7 @@ class EventManager {
                     user: options.user,
                     password: options.password,
                     instantClientPath: options.instantClientPath,
+                    walletPath: options.walletPath,
                     consumerName: options.consumerName,
                     batchSize: options.batchSize,
                     waitTime: options.waitTime,
@@ -166,7 +169,7 @@ class EventManager {
         if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
             return;
         try {
-            const backlog = await this.adapter.getBacklog(KAFKA_TOPICS);
+            const backlog = await this.adapter.getBacklog(TOPICS);
             backlog.forEach((size, topic) => {
                 this.metrics.updateKafkaBacklog(topic, size);
                 console.log(`Backlog for topic ${topic}: ${size} messages`);
