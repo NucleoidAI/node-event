@@ -25,15 +25,20 @@ const TOPICS = [
   "KNOWLEDGES_LOADED",
   "MESSAGES_LOADED",
 ];
+
 export class EventManager {
   private adapter: EventAdapter | null = null;
   private callbacks: Map<string, Set<Callback>> = new Map();
   private metrics = new EventMetrics();
   private backlogInterval: NodeJS.Timeout | null = null;
+
+  private historySince?: Date;
+
   async init(options: InitOptions): Promise<void> {
     if (this.adapter) {
       await this.disconnect();
     }
+
     switch (options.type) {
       case "inMemory":
         this.adapter = new SocketAdapter({
@@ -49,9 +54,7 @@ export class EventManager {
           groupId: options.groupId,
           topics: TOPICS,
         });
-        this.startBacklogMonitoring();
         break;
-
       case "txeventq":
         this.adapter = new TxEventQAdapter({
           connectString: options.connectString,
@@ -64,29 +67,33 @@ export class EventManager {
           waitTime: options.waitTime,
         });
         break;
-
       default:
         throw new Error(`Unknown adapter type`);
     }
+
     await this.adapter.connect();
 
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });
+
+    this.metrics.seedBacklogMetrics(TOPICS);
+
+    this.startBacklogMonitoring();
   }
+
   async publish<T extends object = object>(
     ...args: [...string[], T]
   ): Promise<void> {
-    if (args.length < 1) {
+    if (args.length < 1)
       throw new Error("publish requires at least one event type and a payload");
-    }
-    if (!this.adapter) {
-      throw new Error("Event system not initialized");
-    }
+    if (!this.adapter) throw new Error("Event system not initialized");
+
     const payload = args[args.length - 1] as T;
     const type = args.slice(0, -1) as string[];
     const mergedType = type.join("_");
     this.validateEventType(mergedType);
+
     const payloadSize = JSON.stringify(payload).length;
     const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
     try {
@@ -99,17 +106,15 @@ export class EventManager {
       throw error;
     }
   }
+
   async subscribe<T extends object = object>(
     type: string,
     callback: Callback<T>
   ): Promise<() => void> {
-    if (!this.callbacks.has(type)) {
-      this.callbacks.set(type, new Set());
-    }
+    if (!this.callbacks.has(type)) this.callbacks.set(type, new Set());
 
     const callbackSet = this.callbacks.get(type)!;
     callbackSet.add(callback as Callback);
-
     this.metrics.updateSubscriptions(type, callbackSet.size);
 
     if (this.adapter && callbackSet.size === 1) {
@@ -118,26 +123,20 @@ export class EventManager {
 
     return async () => {
       callbackSet.delete(callback as Callback);
-
       if (callbackSet.size === 0) {
         this.callbacks.delete(type);
-        if (this.adapter) {
-          await this.adapter.unsubscribe(type);
-        }
+        if (this.adapter) await this.adapter.unsubscribe(type);
       }
-
       this.metrics.updateSubscriptions(type, callbackSet.size);
     };
   }
 
   async disconnect(): Promise<void> {
     this.stopBacklogMonitoring();
-
     if (this.adapter) {
       await this.adapter.disconnect();
       this.adapter = null;
     }
-
     this.callbacks.clear();
   }
 
@@ -147,7 +146,7 @@ export class EventManager {
 
   private executeCallbacks(type: string, payload: object): void {
     const callbackSet = this.callbacks.get(type);
-    if (!callbackSet) return; // No callbacks for this topic - message ignored
+    if (!callbackSet) return;
 
     callbackSet.forEach((callback) => {
       setTimeout(() => {
@@ -173,12 +172,19 @@ export class EventManager {
   }
 
   private startBacklogMonitoring(intervalMs: number = 30000): void {
-    if (!(this.adapter instanceof KafkaAdapter)) return;
+    if (!this.adapter) return;
 
-    this.updateBacklogMetrics();
+    if (!this.historySince) {
+      this.historySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    }
 
+    this.updateBacklogMetrics().catch((e) =>
+      console.error("Initial metrics update failed:", e)
+    );
     this.backlogInterval = setInterval(() => {
-      this.updateBacklogMetrics();
+      this.updateBacklogMetrics().catch((e) =>
+        console.error("Periodic metrics update failed:", e)
+      );
     }, intervalMs);
   }
 
@@ -190,16 +196,49 @@ export class EventManager {
   }
 
   private async updateBacklogMetrics(): Promise<void> {
-    if (!(this.adapter instanceof KafkaAdapter)) return;
+    if (!this.adapter) return;
 
     try {
-      const backlog = await this.adapter.getBacklog(TOPICS);
-      backlog.forEach((size, topic) => {
-        this.metrics.updateKafkaBacklog(topic, size);
-        console.log(`Backlog for topic ${topic}: ${size} messages`);
-      });
+      if (this.adapter instanceof KafkaAdapter) {
+        const backlog = await this.adapter.getBacklog(TOPICS);
+        backlog.forEach((size, topic) => {
+          this.metrics.updateEventBacklog(topic, size);
+        });
+      } else if (this.adapter instanceof TxEventQAdapter) {
+        const since = this.historySince;
+        const history = (await (this.adapter as any).getHistory(TOPICS, {
+          since,
+          limitPerTopic: 100,
+          newestFirst: true,
+        })) as Map<string, Array<{ enqueuedAt?: Date | string | null }>>;
+
+        let nextSince = since ?? new Date(0);
+
+        for (const topic of TOPICS) {
+          const entries = history.get(topic) ?? [];
+          this.metrics.updateEventBacklog(topic, entries.length);
+
+          for (const e of entries) {
+            const t =
+              e.enqueuedAt instanceof Date
+                ? e.enqueuedAt
+                : e.enqueuedAt
+                ? new Date(e.enqueuedAt)
+                : undefined;
+            if (t && t > nextSince) nextSince = t;
+          }
+        }
+
+        if (nextSince && (!since || nextSince > since)) {
+          this.historySince = new Date(nextSince.getTime() + 1);
+        }
+      }
+
+      if (this.metrics.getPushgatewayConfig()) {
+        await this.metrics.pushMetricsToGateway();
+      }
     } catch (error) {
-      console.error("Error updating backlog metrics:", error);
+      console.error("Error updating backlog/history metrics:", error);
     }
   }
 
@@ -223,4 +262,3 @@ export class EventManager {
     return this.metrics.getPushgatewayConfig();
   }
 }
-
