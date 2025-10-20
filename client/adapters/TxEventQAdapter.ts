@@ -101,32 +101,29 @@ export class TxEventQAdapter implements EventAdapter {
       throw new Error("TxEventQAdapter not connected");
     }
 
-    try {
-      const queueName = type;
+    const queueName = type;
 
-      this.queue = await this.getOrCreateQueue(queueName, {
-        payloadType: (oracledb as any).DB_TYPE_JSON,
-      } as any);
+    this.queue = await this.getOrCreateQueue(queueName, {
+      payloadType: (oracledb as any).DB_TYPE_JSON,
+    } as any);
 
-      const message = {
-        topic: type,
-        payload: payload,
-      };
+    const message = {
+      topic: type,
+      payload: payload,
+    };
 
-      await this.queue.enqOne({
+    this.queue
+      .enqOne({
         payload: message,
         correlation: type,
         priority: 0,
         delay: 0,
         expiration: -1,
         exceptionQueue: "",
-      } as any);
-
-      await this.connection.commit();
-    } catch (error: any) {
-      console.error("Failed to publish event to TxEventQ:", error.message);
-      throw error;
-    }
+      } as any)
+      .then(() => {
+        this.connection.commit();
+      });
   }
 
   async subscribe(type: string): Promise<void> {
@@ -310,3 +307,4 @@ export class TxEventQAdapter implements EventAdapter {
     return result;
   }
 }
+
