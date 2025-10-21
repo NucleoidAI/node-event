@@ -19,7 +19,7 @@ export class EventMetrics {
   private readonly publishErrors: client.Counter<string>;
   private readonly callbackDuration: client.Histogram<string>;
   private readonly throughput: client.Counter<string>;
-  private readonly eventBacklog: client.Gauge<string>;
+  private readonly kafkaBacklog: client.Gauge<string>;
 
   constructor() {
     this.registry = new client.Registry();
@@ -76,9 +76,9 @@ export class EventMetrics {
       registers: [this.registry],
     });
 
-    this.eventBacklog = new client.Gauge({
-      name: "backlog_events_total",
-      help: "Total events waiting to be processed (or recent history count for TxEventQ), labeled by topic",
+    this.kafkaBacklog = new client.Gauge({
+      name: "kafka_backlog_events_total",
+      help: "Total number of events waiting to be processed",
       labelNames: ["topic"],
       registers: [this.registry],
     });
@@ -103,14 +103,8 @@ export class EventMetrics {
     this.subscriptionGauge.labels(type).set(count);
   }
 
-  updateEventBacklog(topic: string, size: number): void {
-    this.eventBacklog.labels(topic).set(size);
-  }
-
-  seedBacklogMetrics(topics: string[]): void {
-    for (const topic of topics) {
-      this.eventBacklog.labels(topic).set(0);
-    }
+  updateKafkaBacklog(topic: string, size: number): void {
+    this.kafkaBacklog.labels(topic).set(size);
   }
 
   startPushgateway(config: PushgatewayConfig = {}): void {
@@ -122,8 +116,6 @@ export class EventMetrics {
     };
 
     this.stopPushgateway();
-
-    this.pushMetricsToGateway().catch(() => {});
 
     this.pushgatewayInterval = setInterval(() => {
       this.pushMetricsToGateway();
@@ -150,21 +142,24 @@ export class EventMetrics {
     }
 
     try {
-      const body = await this.registry.metrics();
+      const body = await this.registry.metrics(); 
       let url = `${this.pushgatewayConfig.url}/metrics/job/${this.pushgatewayConfig.jobName}`;
+
       if (this.pushgatewayConfig.instance) {
         url += `/instance/${this.pushgatewayConfig.instance}`;
       }
 
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+        headers: { "Content-Type": "text/plain" },
         body,
       });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+
+      console.log("Metrics pushed to Pushgateway successfully");
     } catch (err) {
       console.error("Failed to push metrics to Pushgateway:", err);
     }

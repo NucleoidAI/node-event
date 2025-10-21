@@ -20,13 +20,12 @@ export class TxEventQAdapter implements EventAdapter {
       batchSize?: number;
       waitTime?: number;
       autoCommit?: boolean;
-      queueOwner?: string;
     }
   ) {}
 
   async connect(): Promise<void> {
     try {
-      if (this.options.instantClientPath && (oracledb as any).thin) {
+      if (this.options.instantClientPath && oracledb.thin) {
         try {
           oracledb.initOracleClient({
             libDir: this.options.instantClientPath,
@@ -65,7 +64,7 @@ export class TxEventQAdapter implements EventAdapter {
     if (this.connection) {
       try {
         this.queueCache.clear();
-
+        
         await this.connection.close();
         console.log("TxEventQ connection closed");
       } catch (error) {
@@ -90,9 +89,9 @@ export class TxEventQAdapter implements EventAdapter {
 
     const queue = await this.connection.getQueue(queueName, options);
     this.queueCache.set(queueName, queue);
-
+    
     console.log(`Queue ${queueName} cached`);
-
+    
     return queue;
   }
 
@@ -103,9 +102,9 @@ export class TxEventQAdapter implements EventAdapter {
 
     const queueName = type;
 
-    this.queue = await this.getOrCreateQueue(queueName, {
-      payloadType: (oracledb as any).DB_TYPE_JSON,
-    } as any);
+      this.queue = await this.getOrCreateQueue(queueName, {
+        payloadType: oracledb.DB_TYPE_JSON,
+      } as any);
 
     const message = {
       topic: type,
@@ -133,18 +132,18 @@ export class TxEventQAdapter implements EventAdapter {
     this.isRunning = true;
 
     const queueName = `TXEVENTQ_USER.${type}`;
-
+    
     this.queue = await this.getOrCreateQueue(queueName, {
-      payloadType: (oracledb as any).DB_TYPE_JSON,
+      payloadType: oracledb.DB_TYPE_JSON,
     });
-
+    
     this.queue.deqOptions.wait = 5000;
     this.queue.deqOptions.consumerName =
       this.options.consumerName || `${type.toLowerCase()}_subscriber`;
     try {
       while (this.isRunning) {
         let messages: oracledb.AdvancedQueueMessage[] = [];
-
+        
         const message = await this.queue.deqOne();
         if (message) {
           messages = [message];
@@ -152,7 +151,7 @@ export class TxEventQAdapter implements EventAdapter {
         if (messages && messages.length > 0) {
           if (this.messageHandler) {
             try {
-              const payload = (message as any).payload?.payload || {};
+              const payload = message.payload.payload || {};
               this.messageHandler(type, payload);
             } catch (error) {
               console.error(
@@ -161,7 +160,7 @@ export class TxEventQAdapter implements EventAdapter {
               );
             }
           }
-          if (this.options.autoCommit && this.connection) {
+          if (this.options.autoCommit) {
             await this.connection.commit();
             console.log(
               `Transaction committed for ${messages.length} message(s)`
@@ -175,7 +174,7 @@ export class TxEventQAdapter implements EventAdapter {
     }
   }
 
-  async unsubscribe(_type: string): Promise<void> {
+  async unsubscribe(type: string): Promise<void> {
     if (!this.connection) {
       throw new Error("Subscriber not initialized");
     }
@@ -187,124 +186,13 @@ export class TxEventQAdapter implements EventAdapter {
     this.messageHandler = handler;
   }
 
-  async getHistory(
-    topics: string[],
-    options?: { since?: Date; limitPerTopic?: number; newestFirst?: boolean }
-  ): Promise<Map<string, Array<{ enqueuedAt?: Date | null; state?: string }>>> {
-    const result = new Map<
-      string,
-      Array<{ enqueuedAt?: Date | null; state?: string }>
-    >();
-    if (!topics.length) return result;
-    if (!this.connection) {
-      for (const t of topics) result.set(t, []);
-      return result;
+  async getBacklog(topics: string[]): Promise<Map<string, number>> {
+    const backlogMap = new Map<string, number>();
+
+    if (topics.length === 0) {
+      return backlogMap;
     }
-
-    const owner = (this.options.queueOwner || "TXEVENTQ_USER").toUpperCase();
-    const limit = options?.limitPerTopic ?? 50;
-    const newestFirst = options?.newestFirst !== false;
-    const since = options?.since;
-
-    for (const topic of topics) {
-      const qname = topic.toUpperCase();
-      try {
-        const resAny = (await this.connection.execute(
-          `SELECT OWNER, NAME, QUEUE_TABLE
-             FROM ALL_QUEUES
-            WHERE UPPER(OWNER) = :owner AND UPPER(NAME) = :name`,
-          { owner, name: qname },
-          { outFormat: (oracledb as any).OUT_FORMAT_OBJECT }
-        )) as unknown as {
-          rows?: Array<{ OWNER: string; NAME: string; QUEUE_TABLE: string }>;
-        };
-
-        const row = resAny.rows?.[0];
-        if (!row) {
-          result.set(topic, []);
-          continue;
-        }
-
-        const tab = `AQ$${String(row.QUEUE_TABLE).toUpperCase()}`;
-        const colsAny = (await this.connection.execute(
-          `SELECT COLUMN_NAME, DATA_TYPE
-             FROM ALL_TAB_COLUMNS
-            WHERE OWNER = :owner AND TABLE_NAME = :tab
-              AND COLUMN_NAME IN ('Q_NAME','QUEUE','QUEUE_NAME','MSG_STATE','STATE','ENQ_TIME')`,
-          { owner, tab },
-          { outFormat: (oracledb as any).OUT_FORMAT_OBJECT }
-        )) as unknown as {
-          rows?: Array<{ COLUMN_NAME: string; DATA_TYPE: string }>;
-        };
-
-        const present = new Map<string, string>();
-        for (const r of colsAny.rows || []) {
-          present.set(
-            String(r.COLUMN_NAME).toUpperCase(),
-            String(r.DATA_TYPE).toUpperCase()
-          );
-        }
-        const qNameCol =
-          (present.has("Q_NAME") && "Q_NAME") ||
-          (present.has("QUEUE") && "QUEUE") ||
-          (present.has("QUEUE_NAME") && "QUEUE_NAME");
-        const stateCol =
-          (present.has("MSG_STATE") && "MSG_STATE") ||
-          (present.has("STATE") && "STATE");
-        const hasEnqTime = present.has("ENQ_TIME");
-        if (!qNameCol) {
-          result.set(topic, []);
-          continue;
-        }
-
-        const tableFqn = `${owner}.${tab}`;
-        const where: string[] = [`UPPER(${qNameCol}) = :qname`];
-        const binds: Record<string, any> = { qname };
-
-        if (since && hasEnqTime) {
-          where.push("ENQ_TIME >= :since");
-          binds.since = since;
-        }
-
-        const orderCol = hasEnqTime ? "ENQ_TIME" : stateCol || qNameCol;
-        const orderDir = newestFirst ? "DESC" : "ASC";
-        const selectCols = [
-          stateCol ? `${stateCol} AS STATE` : `NULL AS STATE`,
-          hasEnqTime ? `ENQ_TIME` : `NULL AS ENQ_TIME`,
-        ].join(", ");
-
-        const sql = `
-          SELECT * FROM (
-            SELECT ${selectCols}
-              FROM ${tableFqn}
-             WHERE ${where.join(" AND ")}
-             ORDER BY ${orderCol} ${orderDir}
-          )
-          WHERE ROWNUM <= :limit_n
-        `;
-        binds.limit_n = limit;
-
-        const rowsAny = (await this.connection.execute(sql, binds, {
-          outFormat: (oracledb as any).OUT_FORMAT_OBJECT,
-        })) as unknown as {
-          rows?: Array<{ STATE?: number | string; ENQ_TIME?: Date | null }>;
-        };
-
-        const rows = rowsAny.rows || [];
-        result.set(
-          topic,
-          rows.map((r) => ({
-            enqueuedAt: r.ENQ_TIME ?? null,
-            state: r.STATE != null ? String(r.STATE) : undefined,
-          }))
-        );
-      } catch (err) {
-        console.error(`Error fetching history for topic ${topic}:`, err);
-        result.set(topic, []);
-      }
-    }
-
-    return result;
+    // TODO: Implement backlog calculation for TxEventQ
+    return backlogMap;
   }
 }
-
