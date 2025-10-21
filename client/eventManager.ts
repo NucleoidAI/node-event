@@ -30,6 +30,7 @@ export class EventManager {
   private callbacks: Map<string, Set<Callback>> = new Map();
   private metrics = new EventMetrics();
   private backlogInterval: NodeJS.Timeout | null = null;
+
   async init(options: InitOptions): Promise<void> {
     if (this.adapter) {
       await this.disconnect();
@@ -63,6 +64,7 @@ export class EventManager {
           batchSize: options.batchSize,
           waitTime: options.waitTime,
         });
+        this.startBacklogMonitoring();
         break;
 
       default:
@@ -74,6 +76,7 @@ export class EventManager {
       this.handleIncomingMessage(type, payload);
     });
   }
+
   async publish<T extends object = object>(
     ...args: [...string[], T]
   ): Promise<void> {
@@ -99,6 +102,7 @@ export class EventManager {
       throw error;
     }
   }
+
   async subscribe<T extends object = object>(
     type: string,
     callback: Callback<T>
@@ -172,8 +176,15 @@ export class EventManager {
     }
   }
 
-  private startBacklogMonitoring(intervalMs: number = 30000): void {
-    if (!(this.adapter instanceof KafkaAdapter)) return;
+  private startBacklogMonitoring(intervalMs: number = 60000): void {
+    if (!this.adapter) return;
+
+    // Only monitor for adapters that implement meaningful backlog
+    const supportsBacklog =
+      this.adapter instanceof KafkaAdapter ||
+      this.adapter instanceof TxEventQAdapter;
+
+    if (!supportsBacklog) return;
 
     this.updateBacklogMetrics();
 
@@ -190,12 +201,20 @@ export class EventManager {
   }
 
   private async updateBacklogMetrics(): Promise<void> {
-    if (!(this.adapter instanceof KafkaAdapter)) return;
+    if (!this.adapter) return;
+
+    const supportsBacklog =
+      this.adapter instanceof KafkaAdapter ||
+      this.adapter instanceof TxEventQAdapter;
+
+    if (!supportsBacklog) return;
 
     try {
-      const backlog = await this.adapter.getBacklog(TOPICS);
+      const backlog = await (
+        this.adapter as KafkaAdapter | TxEventQAdapter
+      ).getBacklog(TOPICS);
       backlog.forEach((size, topic) => {
-        this.metrics.updateKafkaBacklog(topic, size);
+        this.metrics.updateEventBacklog(topic, size);
         console.log(`Backlog for topic ${topic}: ${size} messages`);
       });
     } catch (error) {
@@ -223,4 +242,3 @@ export class EventManager {
     return this.metrics.getPushgatewayConfig();
   }
 }
-

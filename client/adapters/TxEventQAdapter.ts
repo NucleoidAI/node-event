@@ -64,7 +64,7 @@ export class TxEventQAdapter implements EventAdapter {
     if (this.connection) {
       try {
         this.queueCache.clear();
-        
+
         await this.connection.close();
         console.log("TxEventQ connection closed");
       } catch (error) {
@@ -89,9 +89,9 @@ export class TxEventQAdapter implements EventAdapter {
 
     const queue = await this.connection.getQueue(queueName, options);
     this.queueCache.set(queueName, queue);
-    
+
     console.log(`Queue ${queueName} cached`);
-    
+
     return queue;
   }
 
@@ -102,9 +102,9 @@ export class TxEventQAdapter implements EventAdapter {
 
     const queueName = type;
 
-      this.queue = await this.getOrCreateQueue(queueName, {
-        payloadType: oracledb.DB_TYPE_JSON,
-      } as any);
+    this.queue = await this.getOrCreateQueue(queueName, {
+      payloadType: oracledb.DB_TYPE_JSON,
+    } as any);
 
     const message = {
       topic: type,
@@ -132,18 +132,18 @@ export class TxEventQAdapter implements EventAdapter {
     this.isRunning = true;
 
     const queueName = `TXEVENTQ_USER.${type}`;
-    
+
     this.queue = await this.getOrCreateQueue(queueName, {
       payloadType: oracledb.DB_TYPE_JSON,
     });
-    
+
     this.queue.deqOptions.wait = 5000;
     this.queue.deqOptions.consumerName =
       this.options.consumerName || `${type.toLowerCase()}_subscriber`;
     try {
       while (this.isRunning) {
         let messages: oracledb.AdvancedQueueMessage[] = [];
-        
+
         const message = await this.queue.deqOne();
         if (message) {
           messages = [message];
@@ -188,11 +188,45 @@ export class TxEventQAdapter implements EventAdapter {
 
   async getBacklog(topics: string[]): Promise<Map<string, number>> {
     const backlogMap = new Map<string, number>();
+    if (!this.connection || !topics?.length) return backlogMap;
 
-    if (topics.length === 0) {
-      return backlogMap;
+    const sql = `
+      SELECT NVL(SUM(s.ENQUEUED_MSGS - s.DEQUEUED_MSGS), 0) AS BACKLOG
+        FROM GV$AQ_SHARDED_SUBSCRIBER_STAT s
+        JOIN USER_QUEUES q
+          ON q.QID = s.QUEUE_ID
+        JOIN USER_QUEUE_SUBSCRIBERS sub
+          ON sub.SUBSCRIBER_ID = s.SUBSCRIBER_ID
+         AND sub.QUEUE_NAME = q.NAME
+       WHERE q.NAME IN (:queueName1, :queueName2)
+         AND (:consumerName IS NULL OR sub.CONSUMER_NAME = :consumerName)
+    `;
+
+    const consumerName =
+      typeof this.options.consumerName === "string"
+        ? this.options.consumerName
+        : null;
+
+    for (const topic of topics) {
+      const queueName1 = `TXEVENTQ_USER.${topic}`;
+      const queueName2 = topic;
+
+      try {
+        const result = await this.connection.execute(
+          sql,
+          { queueName1, queueName2, consumerName },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+
+        const rows = (result.rows || []) as Array<{ BACKLOG: number }>;
+        const val = Number(rows?.[0]?.BACKLOG ?? 0);
+        backlogMap.set(topic, isNaN(val) ? 0 : val);
+      } catch (err) {
+        console.error(`Backlog query failed for topic ${topic}:`, err);
+        backlogMap.set(topic, 0);
+      }
     }
-    // TODO: Implement backlog calculation for TxEventQ
+
     return backlogMap;
   }
 }
