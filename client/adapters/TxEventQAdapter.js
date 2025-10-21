@@ -82,7 +82,6 @@ class TxEventQAdapter {
         this.isRunning = false;
         if (this.connection) {
             try {
-                // Clear the queue cache
                 this.queueCache.clear();
                 await this.connection.close();
                 console.log("TxEventQ connection closed");
@@ -98,11 +97,9 @@ class TxEventQAdapter {
         if (!this.connection) {
             throw new Error("TxEventQAdapter not connected");
         }
-        // Check if queue is already cached
         if (this.queueCache.has(queueName)) {
             return this.queueCache.get(queueName);
         }
-        // Create new queue and cache it
         const queue = await this.connection.getQueue(queueName, options);
         this.queueCache.set(queueName, queue);
         console.log(`Queue ${queueName} cached`);
@@ -112,29 +109,26 @@ class TxEventQAdapter {
         if (!this.connection) {
             throw new Error("TxEventQAdapter not connected");
         }
-        try {
-            const queueName = type;
-            this.queue = await this.getOrCreateQueue(queueName, {
-                payloadType: oracledb.DB_TYPE_JSON,
-            });
-            const message = {
-                topic: type,
-                payload: payload,
-            };
-            await this.queue.enqOne({
-                payload: message,
-                correlation: type,
-                priority: 0,
-                delay: 0,
-                expiration: -1,
-                exceptionQueue: "",
-            });
-            await this.connection.commit();
-        }
-        catch (error) {
-            console.error("Failed to publish event to TxEventQ:", error.message);
-            throw error;
-        }
+        const queueName = type;
+        this.queue = await this.getOrCreateQueue(queueName, {
+            payloadType: oracledb.DB_TYPE_JSON,
+        });
+        const message = {
+            topic: type,
+            payload: payload,
+        };
+        this.queue
+            .enqOne({
+            payload: message,
+            correlation: type,
+            priority: 0,
+            delay: 0,
+            expiration: -1,
+            exceptionQueue: "",
+        })
+            .then(() => {
+            this.connection.commit();
+        });
     }
     async subscribe(type) {
         if (!this.connection) {

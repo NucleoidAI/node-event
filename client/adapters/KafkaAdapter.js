@@ -58,9 +58,14 @@ class KafkaAdapter {
         if (!this.producer) {
             throw new Error("Producer not connected");
         }
-        await this.producer.send({
+        this.producer.send({
             topic: type,
             messages: [{ value: JSON.stringify(payload) }],
+        }).then(() => {
+            console.log(`Message published to topic ${type}`);
+        }).catch((error) => {
+            console.error(`Error publishing message to topic ${type}:`, error);
+            return Promise.reject(error);
         });
     }
     async subscribe(type) {
