@@ -1,90 +1,49 @@
 import { Callback, EventAdapter, InitOptions } from "./types/types";
 import { EventMetrics, PushgatewayConfig } from "./metrics";
 
-import { KafkaAdapter } from "./adapters/KafkaAdapter";
-import { SocketAdapter } from "./adapters/SocketAdapter";
-import { TxEventQAdapter } from "./adapters/TxEventQAdapter";
+import { EVENT_TOPICS, BACKLOG_MONITORING } from "./constants";
+import { EventSystemNotInitializedError, InvalidEventTypeError } from "./errors";
+import { AdapterFactory } from "./factories/AdapterFactory";
+import { CallbackRegistry } from "./CallbackRegistry";
 
-const TOPICS = [
-  "KNOWLEDGE_CREATED",
-  "MESSAGE_USER_MESSAGED",
-  "SESSION_USER_MESSAGED",
-  "TASK_CREATED",
-  "STEP_ADDED",
-  "STEP_COMPLETED",
-  "MESSAGE_USER_MESSAGED",
-  "MESSAGE_ASSISTANT_MESSAGED",
-  "RESPONSIBILITY_CREATED",
-  "RESPONSIBILITY_DESCRIPTION_GENERATED",
-  "SESSION_INITIATED",
-  "SESSION_USER_MESSAGED",
-  "SESSION_AI_MESSAGED",
-  "SUPERVISING_RAISED",
-  "SUPERVISING_ANSWERED",
-  "TASK_COMPLETED",
-  "KNOWLEDGES_LOADED",
-  "MESSAGES_LOADED",
-];
 export class EventManager {
   private adapter: EventAdapter | null = null;
-  private callbacks: Map<string, Set<Callback>> = new Map();
+  private callbackRegistry = new CallbackRegistry();
   private metrics = new EventMetrics();
   private backlogInterval: NodeJS.Timeout | null = null;
+  private adapterFactory = new AdapterFactory();
 
   async init(options: InitOptions): Promise<void> {
     if (this.adapter) {
       await this.disconnect();
     }
-    switch (options.type) {
-      case "inMemory":
-        this.adapter = new SocketAdapter({
-          host: options.host,
-          port: options.port,
-          protocol: options.protocol,
-        });
-        break;
-      case "kafka":
-        this.adapter = new KafkaAdapter({
-          clientId: options.clientId,
-          brokers: options.brokers,
-          groupId: options.groupId,
-          topics: TOPICS,
-        });
-        this.startBacklogMonitoring();
-        break;
 
-      case "txeventq":
-        this.adapter = new TxEventQAdapter({
-          connectString: options.connectString,
-          user: options.user,
-          password: options.password,
-          instantClientPath: options.instantClientPath,
-          walletPath: options.walletPath,
-          consumerName: options.consumerName,
-          batchSize: options.batchSize,
-          waitTime: options.waitTime,
-        });
-        this.startBacklogMonitoring();
-        break;
-
-      default:
-        throw new Error(`Unknown adapter type`);
-    }
+    this.adapter = this.adapterFactory.create(options);
     await this.adapter.connect();
 
     this.adapter.onMessage((type, payload) => {
       this.handleIncomingMessage(type, payload);
     });
+
+    // Set up callback to update metrics when subscriptions change
+    this.callbackRegistry.setSubscriptionChangeCallback((type, count) => {
+      this.metrics.updateSubscriptions(type, count);
+    });
+
+    // Start backlog monitoring for adapters that support it
+    if (this.adapterFactory.supportsBacklog(this.adapter)) {
+      this.startBacklogMonitoring();
+    }
   }
 
   async publish<T extends object = object>(
     ...args: [...string[], T]
   ): Promise<void> {
     if (args.length < 1) {
-      throw new Error("publish requires at least one event type and a payload");
+      throw new InvalidEventTypeError("", { reason: "publish requires at least one event type and a payload" });
     }
     if (!this.adapter) {
-      throw new Error("Event system not initialized");
+      throw new EventSystemNotInitializedError();
     }
     const payload = args[args.length - 1] as T;
     const type = args.slice(0, -1) as string[];
@@ -94,7 +53,9 @@ export class EventManager {
     const endTimer = this.metrics.recordPublish(mergedType, payloadSize);
     try {
       await this.adapter.publish(mergedType, payload);
-      this.executeCallbacks(mergedType, payload);
+      this.callbackRegistry.execute(mergedType, payload, () =>
+        this.metrics.recordCallback(mergedType)
+      );
       endTimer();
     } catch (error) {
       this.metrics.recordPublishError(mergedType, "publish_error");
@@ -107,30 +68,23 @@ export class EventManager {
     type: string,
     callback: Callback<T>
   ): Promise<() => void> {
-    if (!this.callbacks.has(type)) {
-      this.callbacks.set(type, new Set());
-    }
+    const wasEmpty = !this.callbackRegistry.hasCallbacks(type);
 
-    const callbackSet = this.callbacks.get(type)!;
-    callbackSet.add(callback as Callback);
+    const unsubscribe = this.callbackRegistry.register(type, callback);
 
-    this.metrics.updateSubscriptions(type, callbackSet.size);
-
-    if (this.adapter && callbackSet.size === 1) {
+    // Subscribe to adapter if this is the first callback for this type
+    if (this.adapter && wasEmpty) {
       await this.adapter.subscribe(type);
     }
 
+    // Return async unsubscribe function
     return async () => {
-      callbackSet.delete(callback as Callback);
+      unsubscribe();
 
-      if (callbackSet.size === 0) {
-        this.callbacks.delete(type);
-        if (this.adapter) {
-          await this.adapter.unsubscribe(type);
-        }
+      // Unsubscribe from adapter if no more callbacks for this type
+      if (!this.callbackRegistry.hasCallbacks(type) && this.adapter) {
+        await this.adapter.unsubscribe(type);
       }
-
-      this.metrics.updateSubscriptions(type, callbackSet.size);
     };
   }
 
@@ -142,28 +96,13 @@ export class EventManager {
       this.adapter = null;
     }
 
-    this.callbacks.clear();
+    this.callbackRegistry.clear();
   }
 
   private handleIncomingMessage(type: string, payload: object): void {
-    this.executeCallbacks(type, payload);
-  }
-
-  private executeCallbacks(type: string, payload: object): void {
-    const callbackSet = this.callbacks.get(type);
-    if (!callbackSet) return; // No callbacks for this topic - message ignored
-
-    callbackSet.forEach((callback) => {
-      setTimeout(() => {
-        const endTimer = this.metrics.recordCallback(type);
-        try {
-          callback(payload);
-        } catch (error) {
-          console.error(`Error in callback for ${type}:`, error);
-        }
-        endTimer();
-      }, 0);
-    });
+    this.callbackRegistry.execute(type, payload, () =>
+      this.metrics.recordCallback(type)
+    );
   }
 
   private validateEventType(type: string): void {
@@ -172,19 +111,21 @@ export class EventManager {
       type === "constructor" ||
       type === "prototype"
     ) {
-      throw new Error("Invalid event type");
+      throw new InvalidEventTypeError(type, { reason: "Reserved keyword" });
     }
   }
 
-  private startBacklogMonitoring(intervalMs: number = 60000): void {
+  private startBacklogMonitoring(intervalMs: number = BACKLOG_MONITORING.DEFAULT_INTERVAL_MS): void {
     if (!this.adapter) return;
 
-    // Only monitor for adapters that implement meaningful backlog
-    const supportsBacklog =
-      this.adapter instanceof KafkaAdapter ||
-      this.adapter instanceof TxEventQAdapter;
+    // Prevent multiple intervals from being created
+    if (this.backlogInterval) {
+      console.warn("Backlog monitoring is already running");
+      return;
+    }
 
-    if (!supportsBacklog) return;
+    // Only monitor for adapters that implement meaningful backlog
+    if (!this.adapterFactory.supportsBacklog(this.adapter)) return;
 
     this.updateBacklogMetrics();
 
@@ -203,16 +144,10 @@ export class EventManager {
   private async updateBacklogMetrics(): Promise<void> {
     if (!this.adapter) return;
 
-    const supportsBacklog =
-      this.adapter instanceof KafkaAdapter ||
-      this.adapter instanceof TxEventQAdapter;
-
-    if (!supportsBacklog) return;
+    if (!this.adapterFactory.supportsBacklog(this.adapter)) return;
 
     try {
-      const backlog = await (
-        this.adapter as KafkaAdapter | TxEventQAdapter
-      ).getBacklog(TOPICS);
+      const backlog = await this.adapter.getBacklog([...EVENT_TOPICS]);
       backlog.forEach((size, topic) => {
         this.metrics.updateEventBacklog(topic, size);
         console.log(`Backlog for topic ${topic}: ${size} messages`);
