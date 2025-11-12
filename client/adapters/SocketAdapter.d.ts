@@ -1,21 +1,17 @@
 import { EventAdapter } from "../types/types";
-export declare class KafkaAdapter implements EventAdapter {
+export declare class SocketAdapter implements EventAdapter {
     private readonly options;
-    private kafka;
-    private consumer;
-    private producer;
+    private socket;
     private messageHandler?;
     constructor(options: {
-        clientId: string;
-        brokers: string[];
-        groupId: string;
-        topics: string[];
+        host: string;
+        port?: number;
+        protocol: string;
     });
     connect(): Promise<void>;
     disconnect(): Promise<void>;
-    publish<T = object>(type: string, payload: T): Promise<void>;
+    publish(type: string, payload: object): Promise<void>;
     subscribe(type: string): Promise<void>;
     unsubscribe(type: string): Promise<void>;
     onMessage(handler: (type: string, payload: object) => void): void;
-    getBacklog(topics: string[]): Promise<Map<string, number>>;
 }

@@ -1,18 +1,25 @@
 import { EventAdapter } from "../types/types";
-export declare class KafkaAdapter implements EventAdapter {
+export declare class TxEventQAdapter implements EventAdapter {
     private readonly options;
-    private kafka;
-    private consumer;
-    private producer;
+    private connection;
+    private queue;
+    private queueCache;
     private messageHandler?;
+    private isRunning;
     constructor(options: {
-        clientId: string;
-        brokers: string[];
-        groupId: string;
-        topics: string[];
+        connectString: string;
+        user: string;
+        password: string;
+        instantClientPath?: string;
+        walletPath?: string;
+        consumerName?: string;
+        batchSize?: number;
+        waitTime?: number;
+        autoCommit?: boolean;
     });
     connect(): Promise<void>;
     disconnect(): Promise<void>;
+    private getOrCreateQueue;
     publish<T = object>(type: string, payload: T): Promise<void>;
     subscribe(type: string): Promise<void>;
     unsubscribe(type: string): Promise<void>;

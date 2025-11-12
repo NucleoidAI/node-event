@@ -1,0 +1,25 @@
+import * as client from "prom-client";
+import { Callback, InitOptions } from "./types/types";
+import { EventMetrics, PushgatewayConfig } from "./metrics";
+import { EventManager } from "./eventManager";
+import { KafkaAdapter } from "./adapters/KafkaAdapter";
+import { SocketAdapter } from "./adapters/SocketAdapter";
+import { TxEventQAdapter } from "./adapters/TxEventQAdapter";
+export declare const event: {
+    init: (options: InitOptions) => Promise<void>;
+    publish: <T extends object = object>(...args: [...string[], T]) => Promise<void>;
+    subscribe: <T extends object = object>(type: string, callback: Callback<T>) => Promise<() => void>;
+    disconnect: () => Promise<void>;
+    checkBacklog: () => Promise<void>;
+    startBacklogMonitoring: () => void;
+    stopBacklogMonitoring: () => void;
+    restartKafkaConsumer: () => Promise<void>;
+    startPushgateway: (config?: PushgatewayConfig) => void;
+    stopPushgateway: () => void;
+    pushMetricsToGateway: () => Promise<void>;
+    getPushgatewayConfig: () => PushgatewayConfig | undefined;
+};
+export { client };
+export { EventManager, EventMetrics, SocketAdapter, KafkaAdapter, TxEventQAdapter, };
+export type { PushgatewayConfig };
+export * from "./types/types";
