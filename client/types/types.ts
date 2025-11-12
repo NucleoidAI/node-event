@@ -7,6 +7,7 @@ export interface EventAdapter {
   subscribe(type: string): Promise<void>;
   unsubscribe(type: string): Promise<void>;
   onMessage(handler: (type: string, payload: object) => void): void;
+  getBacklog?(topics: string[]): Promise<Map<string, number>>;
 }
 
 export interface BaseInitOptions {

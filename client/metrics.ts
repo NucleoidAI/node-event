@@ -1,4 +1,6 @@
 import * as client from "prom-client";
+import { PUSHGATEWAY_DEFAULTS, METRICS_BUCKETS } from "./constants";
+import { PushgatewayNotConfiguredError, MetricsPushError } from "./errors";
 
 export interface PushgatewayConfig {
   url?: string;
@@ -42,7 +44,7 @@ export class EventMetrics {
       name: "event_publish_duration_seconds",
       help: "Time taken to publish events",
       labelNames: ["event_type"],
-      buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+      buckets: METRICS_BUCKETS.DURATION_SECONDS,
       registers: [this.registry],
     });
 
@@ -50,7 +52,7 @@ export class EventMetrics {
       name: "event_payload_size_bytes",
       help: "Size of event payloads in bytes",
       labelNames: ["event_type"],
-      buckets: [10, 100, 1000, 10000, 100000, 1000000],
+      buckets: METRICS_BUCKETS.PAYLOAD_SIZE_BYTES,
       registers: [this.registry],
     });
 
@@ -65,7 +67,7 @@ export class EventMetrics {
       name: "event_callback_duration_seconds",
       help: "Time taken to process event callbacks",
       labelNames: ["event_type"],
-      buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+      buckets: METRICS_BUCKETS.DURATION_SECONDS,
       registers: [this.registry],
     });
 
@@ -109,10 +111,10 @@ export class EventMetrics {
 
   startPushgateway(config: PushgatewayConfig = {}): void {
     this.pushgatewayConfig = {
-      url: config.url || "http://localhost:9091",
-      jobName: config.jobName || "node_events",
-      instance: config.instance || "default_instance",
-      interval: config.interval || 15000,
+      url: config.url || PUSHGATEWAY_DEFAULTS.URL,
+      jobName: config.jobName || PUSHGATEWAY_DEFAULTS.JOB_NAME,
+      instance: config.instance || PUSHGATEWAY_DEFAULTS.INSTANCE,
+      interval: config.interval || PUSHGATEWAY_DEFAULTS.INTERVAL_MS,
     };
 
     this.stopPushgateway();
@@ -136,9 +138,7 @@ export class EventMetrics {
 
   async pushMetricsToGateway(): Promise<void> {
     if (!this.pushgatewayConfig) {
-      throw new Error(
-        "Pushgateway not configured. Call startPushgateway() first."
-      );
+      throw new PushgatewayNotConfiguredError();
     }
 
     try {
@@ -162,6 +162,7 @@ export class EventMetrics {
       console.log("Metrics pushed to Pushgateway successfully");
     } catch (err) {
       console.error("Failed to push metrics to Pushgateway:", err);
+      throw new MetricsPushError(err as Error);
     }
   }
 
