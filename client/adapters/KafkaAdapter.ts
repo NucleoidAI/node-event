@@ -1,6 +1,8 @@
 import { Consumer, Kafka, Producer } from "kafkajs";
 
 import { EventAdapter } from "../types/types";
+import { KAFKA_CONFIG } from "../constants";
+import { AdapterNotConnectedError, PublishError } from "../errors";
 
 export class KafkaAdapter implements EventAdapter {
   private kafka: Kafka;
@@ -33,7 +35,7 @@ export class KafkaAdapter implements EventAdapter {
       fromBeginning: false,
     });
     await this.consumer.run({
-      partitionsConsumedConcurrently: 160,
+      partitionsConsumedConcurrently: KAFKA_CONFIG.PARTITIONS_CONSUMED_CONCURRENTLY,
       eachMessage: async ({ topic, message }) => {
         if (topic.startsWith("__")) {
           return;
@@ -69,17 +71,18 @@ export class KafkaAdapter implements EventAdapter {
 
   async publish<T = object>(type: string, payload: T): Promise<void> {
     if (!this.producer) {
-      throw new Error("Producer not connected");
+      throw new AdapterNotConnectedError("KafkaAdapter");
     }
-    this.producer.send({
-      topic: type,
-      messages: [{ value: JSON.stringify(payload) }],
-    }).then(() => {
+    try {
+      await this.producer.send({
+        topic: type,
+        messages: [{ value: JSON.stringify(payload) }],
+      });
       console.log(`Message published to topic ${type}`);
-    }).catch((error) => {
+    } catch (error) {
       console.error(`Error publishing message to topic ${type}:`, error);
-      return Promise.reject(error);
-    });
+      throw new PublishError(type, error as Error);
+    }
   }
 
   async subscribe(type: string): Promise<void> {
