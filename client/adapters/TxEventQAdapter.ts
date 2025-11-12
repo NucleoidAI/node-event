@@ -1,13 +1,103 @@
 import * as oracledb from "oracledb";
 
+import { AdapterConnectionError, AdapterNotConnectedError, PublishError, SubscribeError, UnsubscribeError } from "../errors";
+
 import { EventAdapter } from "../types/types";
+
+interface QueueMessage {
+  topic: string;
+  payload: object;
+}
+
+interface QueueOptions {
+  payloadType: typeof oracledb.DB_TYPE_JSON;
+}
+
+interface EnqueueOptions {
+  payload: QueueMessage;
+  correlation: string;
+  priority: number;
+  delay: number;
+  expiration: number;
+  exceptionQueue: string;
+}
+
+class TopicConsumer {
+  private isRunning: boolean = false;
+  private consumerPromise: Promise<void> | null = null;
+
+  constructor(
+    private queue: oracledb.AdvancedQueue<QueueMessage>,
+    private topic: string,
+    private messageHandler: (type: string, payload: object) => void,
+    private connection: oracledb.Connection,
+    private autoCommit: boolean = false
+  ) {}
+
+  start(): void {
+    if (this.isRunning) {
+      console.warn(`Consumer for topic ${this.topic} is already running`);
+      return;
+    }
+
+    this.isRunning = true;
+    this.consumerPromise = this.consumeLoop();
+  }
+
+  async stop(): Promise<void> {
+    this.isRunning = false;
+    if (this.consumerPromise) {
+      await this.consumerPromise;
+      this.consumerPromise = null;
+    }
+  }
+
+  private async consumeLoop(): Promise<void> {
+    while (this.isRunning) {
+      try {
+        const message = await this.queue.deqOne();
+
+        if (message && message.payload) {
+          try {
+            const actualPayload = message.payload.payload || message.payload;
+            this.messageHandler(this.topic, actualPayload);
+
+            if (this.autoCommit) {
+              await this.connection.commit();
+            }
+          } catch (processingError) {
+            console.error(
+              `Error processing message for topic ${this.topic}:`,
+              processingError
+            );
+          }
+        }
+      } catch (dequeueError: any) {
+        if (dequeueError.message && !dequeueError.message.includes("DPI-1067")) {
+          console.error(
+            `Error dequeuing message for topic ${this.topic}:`,
+            dequeueError
+          );
+        }
+        await this.sleep(100);
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  isActive(): boolean {
+    return this.isRunning;
+  }
+}
 
 export class TxEventQAdapter implements EventAdapter {
   private connection: oracledb.Connection | null = null;
-  private queue: oracledb.AdvancedQueue<any> | null = null;
-  private queueCache: Map<string, oracledb.AdvancedQueue<any>> = new Map();
+  private queueCache: Map<string, oracledb.AdvancedQueue<QueueMessage>> = new Map();
+  private consumers: Map<string, TopicConsumer> = new Map();
   private messageHandler?: (type: string, payload: object) => void;
-  private isRunning: boolean = false;
 
   constructor(
     private readonly options: {
@@ -49,38 +139,38 @@ export class TxEventQAdapter implements EventAdapter {
         walletPath: this.options.walletPath,
       });
 
-      this.isRunning = true;
-
       console.log("TxEventQ adapter connected successfully");
     } catch (error: any) {
       console.error("Failed to connect to TxEventQ:", error.message);
-      throw error;
+      throw new AdapterConnectionError("TxEventQ", error);
     }
   }
 
   async disconnect(): Promise<void> {
-    this.isRunning = false;
+    const stopPromises = Array.from(this.consumers.values()).map(consumer =>
+      consumer.stop()
+    );
+    await Promise.all(stopPromises);
+    this.consumers.clear();
 
     if (this.connection) {
       try {
         this.queueCache.clear();
-
         await this.connection.close();
         console.log("TxEventQ connection closed");
       } catch (error) {
         console.error("Error closing TxEventQ connection:", error);
       }
       this.connection = null;
-      this.queue = null;
     }
   }
 
   private async getOrCreateQueue(
     queueName: string,
-    options: any
-  ): Promise<oracledb.AdvancedQueue<any>> {
+    options: QueueOptions
+  ): Promise<oracledb.AdvancedQueue<QueueMessage>> {
     if (!this.connection) {
-      throw new Error("TxEventQAdapter not connected");
+      throw new AdapterNotConnectedError("TxEventQAdapter");
     }
 
     if (this.queueCache.has(queueName)) {
@@ -90,96 +180,114 @@ export class TxEventQAdapter implements EventAdapter {
     const queue = await this.connection.getQueue(queueName, options);
     this.queueCache.set(queueName, queue);
 
-    console.log(`Queue ${queueName} cached`);
+    console.log(`Queue ${queueName} created and cached`);
 
     return queue;
   }
 
+  private getQueueName(type: string): string {
+     return `TXEVENTQ_USER.${type}`;
+  }
+
   async publish<T = object>(type: string, payload: T): Promise<void> {
     if (!this.connection) {
-      throw new Error("TxEventQAdapter not connected");
+      throw new AdapterNotConnectedError("TxEventQAdapter");
     }
 
-    const queueName = type;
+    const queueName = this.getQueueName(type);
 
-    this.queue = await this.getOrCreateQueue(queueName, {
-      payloadType: oracledb.DB_TYPE_JSON,
-    } as any);
+    try {
+      const queue = await this.getOrCreateQueue(queueName, {
+        payloadType: oracledb.DB_TYPE_JSON,
+      });
 
-    const message = {
-      topic: type,
-      payload: payload,
-    };
+      const message: QueueMessage = {
+        topic: type,
+        payload: payload as object,
+      };
 
-    this.queue
-      .enqOne({
+      const enqOptions: EnqueueOptions = {
         payload: message,
         correlation: type,
         priority: 0,
         delay: 0,
         expiration: -1,
         exceptionQueue: "",
-      } as any)
-      .then(() => {
-        this.connection.commit();
-      });
+      };
+
+      await queue.enqOne(enqOptions);
+
+      if (this.connection) {
+        await this.connection.commit();
+      }
+
+      console.log(`Message published to queue ${queueName}`);
+    } catch (error) {
+      console.error(`Failed to publish to queue ${queueName}:`, error);
+      throw new PublishError(type, error as Error);
+    }
   }
 
   async subscribe(type: string): Promise<void> {
     if (!this.connection) {
-      throw new Error("Subscriber not initialized");
+      throw new AdapterNotConnectedError("TxEventQAdapter");
     }
-    this.isRunning = true;
 
-    const queueName = `TXEVENTQ_USER.${type}`;
+    if (this.consumers.has(type)) {
+      console.warn(`Already subscribed to topic ${type}`);
+      return;
+    }
 
-    this.queue = await this.getOrCreateQueue(queueName, {
-      payloadType: oracledb.DB_TYPE_JSON,
-    });
+    if (!this.messageHandler) {
+      console.warn(`No message handler set for topic ${type}`);
+      return;
+    }
 
-    this.queue.deqOptions.wait = 5000;
-    this.queue.deqOptions.consumerName =
-      this.options.consumerName || `${type.toLowerCase()}_subscriber`;
+    const queueName = this.getQueueName(type);
+
     try {
-      while (this.isRunning) {
-        let messages: oracledb.AdvancedQueueMessage[] = [];
+      const queue = await this.getOrCreateQueue(queueName, {
+        payloadType: oracledb.DB_TYPE_JSON,
+      });
 
-        const message = await this.queue.deqOne();
-        if (message) {
-          messages = [message];
-        }
-        if (messages && messages.length > 0) {
-          if (this.messageHandler) {
-            try {
-              const payload = message.payload.payload || {};
-              this.messageHandler(type, payload);
-            } catch (error) {
-              console.error(
-                `Error processing message for topic ${type}:`,
-                error
-              );
-            }
-          }
-          if (this.options.autoCommit) {
-            await this.connection.commit();
-            console.log(
-              `Transaction committed for ${messages.length} message(s)`
-            );
-          }
-        }
-      }
+      queue.deqOptions.wait = this.options.waitTime || 5000;
+      queue.deqOptions.consumerName =
+        this.options.consumerName || `${type.toLowerCase()}_consumer`;
+
+      const consumer = new TopicConsumer(
+        queue,
+        type,
+        this.messageHandler,
+        this.connection,
+        this.options.autoCommit ?? false
+      );
+
+      this.consumers.set(type, consumer);
+      consumer.start();
+
+      console.log(`Subscribed to topic ${type} on queue ${queueName}`);
     } catch (error) {
-      console.error("Fatal error during consumption:", error);
-      throw error;
+      console.error(`Failed to subscribe to topic ${type}:`, error);
+      throw new SubscribeError(type, error as Error);
     }
   }
 
   async unsubscribe(type: string): Promise<void> {
-    if (!this.connection) {
-      throw new Error("Subscriber not initialized");
+    const consumer = this.consumers.get(type);
+
+    if (!consumer) {
+      console.warn(`No active subscription for topic ${type}`);
+      return;
     }
-    this.isRunning = false;
-    this.queue = null;
+
+    try {
+      await consumer.stop();
+      this.consumers.delete(type);
+      console.log(`Unsubscribed from topic ${type}`);
+    } catch (error) {
+      console.error(`Failed to unsubscribe from topic ${type}:`, error);
+      throw new UnsubscribeError(type, error as Error);
+    }
   }
 
   onMessage(handler: (type: string, payload: object) => void): void {
@@ -198,7 +306,7 @@ export class TxEventQAdapter implements EventAdapter {
         JOIN USER_QUEUE_SUBSCRIBERS sub
           ON sub.SUBSCRIBER_ID = s.SUBSCRIBER_ID
          AND sub.QUEUE_NAME = q.NAME
-       WHERE q.NAME IN (:queueName1, :queueName2)
+       WHERE q.NAME = :queueName
          AND (:consumerName IS NULL OR sub.CONSUMER_NAME = :consumerName)
     `;
 
@@ -208,13 +316,12 @@ export class TxEventQAdapter implements EventAdapter {
         : null;
 
     for (const topic of topics) {
-      const queueName1 = `TXEVENTQ_USER.${topic}`;
-      const queueName2 = topic;
+      const queueName = this.getQueueName(topic);
 
       try {
         const result = await this.connection.execute(
           sql,
-          { queueName1, queueName2, consumerName },
+          { queueName, consumerName },
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
