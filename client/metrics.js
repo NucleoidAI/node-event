@@ -46,7 +46,7 @@ class EventMetrics {
     publishErrors;
     callbackDuration;
     throughput;
-    kafkaBacklog;
+    eventBacklog;
     constructor() {
         this.registry = new client.Registry();
         this.publishCounter = new client.Counter({
@@ -94,8 +94,8 @@ class EventMetrics {
             labelNames: ["event_type"],
             registers: [this.registry],
         });
-        this.kafkaBacklog = new client.Gauge({
-            name: "kafka_backlog_events_total",
+        this.eventBacklog = new client.Gauge({
+            name: "backlog_events_total",
             help: "Total number of events waiting to be processed",
             labelNames: ["topic"],
             registers: [this.registry],
@@ -116,8 +116,8 @@ class EventMetrics {
     updateSubscriptions(type, count) {
         this.subscriptionGauge.labels(type).set(count);
     }
-    updateKafkaBacklog(topic, size) {
-        this.kafkaBacklog.labels(topic).set(size);
+    updateEventBacklog(topic, size) {
+        this.eventBacklog.labels(topic).set(size);
     }
     startPushgateway(config = {}) {
         this.pushgatewayConfig = {

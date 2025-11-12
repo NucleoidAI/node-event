@@ -62,6 +62,7 @@ class EventManager {
                     batchSize: options.batchSize,
                     waitTime: options.waitTime,
                 });
+                this.startBacklogMonitoring();
                 break;
             default:
                 throw new Error(`Unknown adapter type`);
@@ -151,8 +152,13 @@ class EventManager {
             throw new Error("Invalid event type");
         }
     }
-    startBacklogMonitoring(intervalMs = 30000) {
-        if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
+    startBacklogMonitoring(intervalMs = 60000) {
+        if (!this.adapter)
+            return;
+        // Only monitor for adapters that implement meaningful backlog
+        const supportsBacklog = this.adapter instanceof KafkaAdapter_1.KafkaAdapter ||
+            this.adapter instanceof TxEventQAdapter_1.TxEventQAdapter;
+        if (!supportsBacklog)
             return;
         this.updateBacklogMetrics();
         this.backlogInterval = setInterval(() => {
@@ -166,12 +172,16 @@ class EventManager {
         }
     }
     async updateBacklogMetrics() {
-        if (!(this.adapter instanceof KafkaAdapter_1.KafkaAdapter))
+        if (!this.adapter)
+            return;
+        const supportsBacklog = this.adapter instanceof KafkaAdapter_1.KafkaAdapter ||
+            this.adapter instanceof TxEventQAdapter_1.TxEventQAdapter;
+        if (!supportsBacklog)
             return;
         try {
             const backlog = await this.adapter.getBacklog(TOPICS);
             backlog.forEach((size, topic) => {
-                this.metrics.updateKafkaBacklog(topic, size);
+                this.metrics.updateEventBacklog(topic, size);
                 console.log(`Backlog for topic ${topic}: ${size} messages`);
             });
         }

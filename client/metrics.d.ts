@@ -15,13 +15,13 @@ export declare class EventMetrics {
     private readonly publishErrors;
     private readonly callbackDuration;
     private readonly throughput;
-    private readonly kafkaBacklog;
+    private readonly eventBacklog;
     constructor();
     recordPublish(type: string, payloadSizeBytes: number): () => void;
     recordPublishError(type: string, errorType: string): void;
     recordCallback(type: string): () => void;
     updateSubscriptions(type: string, count: number): void;
-    updateKafkaBacklog(topic: string, size: number): void;
+    updateEventBacklog(topic: string, size: number): void;
     startPushgateway(config?: PushgatewayConfig): void;
     stopPushgateway(): void;
     pushMetricsToGateway(): Promise<void>;

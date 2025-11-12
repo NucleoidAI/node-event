@@ -183,10 +183,36 @@ class TxEventQAdapter {
     }
     async getBacklog(topics) {
         const backlogMap = new Map();
-        if (topics.length === 0) {
+        if (!this.connection || !topics?.length)
             return backlogMap;
+        const sql = `
+      SELECT NVL(SUM(s.ENQUEUED_MSGS - s.DEQUEUED_MSGS), 0) AS BACKLOG
+        FROM GV$AQ_SHARDED_SUBSCRIBER_STAT s
+        JOIN USER_QUEUES q
+          ON q.QID = s.QUEUE_ID
+        JOIN USER_QUEUE_SUBSCRIBERS sub
+          ON sub.SUBSCRIBER_ID = s.SUBSCRIBER_ID
+         AND sub.QUEUE_NAME = q.NAME
+       WHERE q.NAME IN (:queueName1, :queueName2)
+         AND (:consumerName IS NULL OR sub.CONSUMER_NAME = :consumerName)
+    `;
+        const consumerName = typeof this.options.consumerName === "string"
+            ? this.options.consumerName
+            : null;
+        for (const topic of topics) {
+            const queueName1 = `TXEVENTQ_USER.${topic}`;
+            const queueName2 = topic;
+            try {
+                const result = await this.connection.execute(sql, { queueName1, queueName2, consumerName }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+                const rows = (result.rows || []);
+                const val = Number(rows?.[0]?.BACKLOG ?? 0);
+                backlogMap.set(topic, isNaN(val) ? 0 : val);
+            }
+            catch (err) {
+                console.error(`Backlog query failed for topic ${topic}:`, err);
+                backlogMap.set(topic, 0);
+            }
         }
-        // TODO: Implement backlog calculation for TxEventQ
         return backlogMap;
     }
 }
